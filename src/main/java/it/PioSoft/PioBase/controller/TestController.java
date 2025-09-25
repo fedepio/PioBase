@@ -12,7 +12,7 @@ public class TestController {
 
     @GetMapping("/health")
     public ResponseEntity<String> health() {
-        System.out.println("Health check endpoint called");
+        System.out.println("Chiamata ricevuta");
         return ResponseEntity.ok("Servizio attivo");
     }
 }
