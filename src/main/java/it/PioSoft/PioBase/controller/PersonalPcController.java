@@ -1,3 +1,20 @@
+/**
+ * Controller REST per la gestione remota dei PC personali
+ *
+ * Fornisce endpoint per il controllo remoto dei PC tramite:
+ * - Wake-on-LAN: accensione remota tramite pacchetto magico
+ * - Spegnimento remoto: via SSH con credenziali configurate
+ * - Controllo stato: verifica se il PC è online/offline
+ *
+ * Tutti i PC sono identificati dal loro indirizzo MAC e mappati
+ * agli IP corrispondenti tramite configurazione.
+ *
+ * @author Federico
+ * @email feder@piosoft.it
+ * @license MIT License
+ * @version 1.0
+ * @since 2024-09-26
+ */
 package it.PioSoft.PioBase.controller;
 
 import it.PioSoft.PioBase.dto.WolRequest;

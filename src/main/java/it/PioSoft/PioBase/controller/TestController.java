@@ -1,3 +1,16 @@
+/**
+ * Controller REST per test e monitoraggio del servizio
+ *
+ * Fornisce endpoint di utilità per:
+ * - Health check: verifica che il servizio sia attivo e funzionante
+ * - Monitoraggio base dello stato dell'applicazione
+ *
+ * @author Federico
+ * @email feder@piosoft.it
+ * @license MIT License
+ * @version 1.0
+ * @since 2024-09-26
+ */
 package it.PioSoft.PioBase.controller;
 
 

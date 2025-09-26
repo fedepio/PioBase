@@ -1,3 +1,21 @@
+/**
+ * Servizio per lo spegnimento remoto dei PC tramite SSH
+ *
+ * Implementa la funzionalità di spegnimento remoto dei PC tramite:
+ * - Connessione SSH sicura con credenziali configurate
+ * - Esecuzione comando shutdown su PC Windows remoti
+ * - Gestione automatica della sessione SSH e cleanup risorse
+ *
+ * Utilizza la libreria JSch per stabilire connessioni SSH e
+ * eseguire comandi di sistema sui PC target. Le credenziali
+ * sono caricate dalla configurazione applicativa.
+ *
+ * @author Federico
+ * @email feder@piosoft.it
+ * @license MIT License
+ * @version 1.0
+ * @since 2024-09-26
+ */
 package it.PioSoft.PioBase.services;
 
 import com.jcraft.jsch.JSch;

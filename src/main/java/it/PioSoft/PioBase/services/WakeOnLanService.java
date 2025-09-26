@@ -1,3 +1,20 @@
+/**
+ * Servizio per l'invio di pacchetti Wake-on-LAN
+ *
+ * Implementa la funzionalità di accensione remota dei PC tramite:
+ * - Creazione e invio di Magic Packet UDP
+ * - Supporto per diversi formati di indirizzo MAC
+ * - Configurazione dell'indirizzo di broadcast
+ *
+ * Il Magic Packet è composto da 6 byte 0xFF seguiti da 16 ripetizioni
+ * dell'indirizzo MAC del PC target sulla porta UDP 9.
+ *
+ * @author Federico
+ * @email feder@piosoft.it
+ * @license MIT License
+ * @version 1.0
+ * @since 2024-09-26
+ */
 package it.PioSoft.PioBase.services;
 
 import org.springframework.stereotype.Service;

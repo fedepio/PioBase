@@ -1,5 +1,23 @@
 package it.PioSoft.PioBase.configs;
 
+/**
+ * Configurazione per la mappatura e gestione dei PC remoti
+ *
+ * Gestisce la configurazione centralizzata per:
+ * - Mappatura MAC address -> IP address dei PC target
+ * - Credenziali SSH per l'accesso remoto ai PC
+ * - Parametri di connessione SSH (porta, timeout)
+ *
+ * Carica le configurazioni dal file application.properties
+ * utilizzando il prefisso "pc" per tutte le proprietà correlate
+ * alla gestione dei PC remoti.
+ *
+ * @author Federico
+ * @email feder@piosoft.it
+ * @license MIT License
+ * @version 1.0
+ * @since 2024-09-26
+ */
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 import java.util.Map;
