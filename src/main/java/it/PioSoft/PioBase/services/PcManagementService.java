@@ -32,8 +32,15 @@ public class PcManagementService {
     private PcStatusService pcStatusService;
 
     public String getIpByMac(String macAddress) {
+        System.out.println("DEBUG - MAC ricevuto: '" + macAddress + "'");
         String cleanMac = macAddress.toLowerCase().replace(":", "").replace("-", "");
-        return pcMappingConfig.getIpByMac(cleanMac);
+        System.out.println("DEBUG - MAC pulito: '" + cleanMac + "'");
+
+        String ip = pcMappingConfig.getIpByMac(cleanMac);
+        System.out.println("DEBUG - IP trovato: '" + ip + "'");
+        System.out.println("DEBUG - Mapping disponibili: " + pcMappingConfig.getMapping());
+
+        return ip;
     }
 
     public boolean isPcOnlineByMac(String macAddress) {

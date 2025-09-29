@@ -20,6 +20,8 @@ public class WolRequest {
 
     private String macAddress;
     private String broadcastAddress = "255.255.255.255"; // Valore di default
+    private String ipAddress; // Aggiunto campo IPAddress
+    private String pin; // PIN di accesso Windows
 
     public String getMacAddress() {
         return macAddress;
@@ -35,5 +37,21 @@ public class WolRequest {
 
     public void setBroadcastAddress(String broadcastAddress) {
         this.broadcastAddress = broadcastAddress;
+    }
+
+    public String getIpAddress() {
+        return ipAddress;
+    }
+
+    public void setIpAddress(String ipAddress) {
+        this.ipAddress = ipAddress;
+    }
+
+    public String getPin() {
+        return pin;
+    }
+
+    public void setPin(String pin) {
+        this.pin = pin;
     }
 }

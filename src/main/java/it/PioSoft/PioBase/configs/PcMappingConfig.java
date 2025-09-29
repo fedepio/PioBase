@@ -20,13 +20,15 @@ package it.PioSoft.PioBase.configs;
  */
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
+
+import java.util.HashMap;
 import java.util.Map;
 
 @Component
 @ConfigurationProperties(prefix = "pc")
 public class PcMappingConfig {
 
-    private Map<String, String> mapping;
+    private Map<String, String> mapping = new HashMap<>();
     private Ssh ssh = new Ssh();
 
     public Map<String, String> getMapping() {
@@ -50,9 +52,10 @@ public class PcMappingConfig {
     }
 
     public static class Ssh {
-        private String username;
-        private String password;
+        private String username = "shutdownuser";
+        private String password = "password";
         private int port = 22;
+        private int timeout = 5000;
 
         public String getUsername() {
             return username;
@@ -76,6 +79,14 @@ public class PcMappingConfig {
 
         public void setPort(int port) {
             this.port = port;
+        }
+
+        public int getTimeout() {
+            return timeout;
+        }
+
+        public void setTimeout(int timeout) {
+            this.timeout = timeout;
         }
     }
 }
