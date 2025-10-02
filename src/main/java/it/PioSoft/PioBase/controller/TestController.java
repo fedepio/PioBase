@@ -14,6 +14,9 @@
 package it.PioSoft.PioBase.controller;
 
 
+import it.PioSoft.PioBase.dto.VersionResponse;
+import it.PioSoft.PioBase.services.VersionService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -23,9 +26,18 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api")
 public class TestController {
 
+    @Autowired
+    private VersionService versionService;
+
     @GetMapping("/health")
     public ResponseEntity<String> health() {
         System.out.println("Chiamata ricevuta");
         return ResponseEntity.ok("Servizio attivo");
+    }
+
+    @GetMapping("/version")
+    public ResponseEntity<VersionResponse> version() {
+        VersionResponse versionInfo = versionService.getVersionInfo();
+        return ResponseEntity.ok(versionInfo);
     }
 }
