@@ -24,9 +24,12 @@ import it.PioSoft.PioBase.services.RemoteShutdownService;
 import it.PioSoft.PioBase.services.WakeOnLanService;
 import it.PioSoft.PioBase.services.PinEntryService;
 import it.PioSoft.PioBase.services.SystemInfoService;
+import it.PioSoft.PioBase.services.DeviceMonitoringService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.Map;
 
@@ -52,6 +55,9 @@ public class PersonalPcController {
 
     @Autowired
     private SystemInfoService systemInfoService;
+
+    @Autowired
+    private DeviceMonitoringService deviceMonitoringService;
 
     @PostMapping("/wol")
     public ResponseEntity<String> wakeOnLan(@RequestBody WolRequest request) {
@@ -232,5 +238,11 @@ public class PersonalPcController {
                 "details", e.getMessage()
             ));
         }
+    }
+
+    @GetMapping(value = "/monitor/{ip}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter monitorDevice(@PathVariable String ip) {
+        System.out.println("Client connesso per monitoraggio dispositivo: " + ip);
+        return deviceMonitoringService.subscribeToDevice(ip);
     }
 }

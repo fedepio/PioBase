@@ -361,4 +361,219 @@ public class SystemInfoService {
             info.getOrDefault("ramUsage", "N/A")
         );
     }
+
+    /**
+     * Versione ottimizzata per il monitoraggio SSE con timeout ridotto
+     * @param ipAddress IP del PC target
+     * @return Map contenente informazioni di sistema o errori
+     */
+    public Map<String, String> getSystemInfoQuick(String ipAddress) {
+        Map<String, String> systemInfo = new HashMap<>();
+
+        try {
+            // Recupera ping veloce
+            String ping = getPing(ipAddress);
+            systemInfo.put("ping", ping);
+
+            // Recupera informazioni CPU e RAM via SSH con timeout ridotto
+            Map<String, String> windowsInfo = getWindowsSystemInfoQuick(ipAddress);
+            systemInfo.putAll(windowsInfo);
+
+        } catch (Exception e) {
+            System.err.println("Errore durante il recupero veloce delle informazioni di sistema: " + e.getMessage());
+            systemInfo.put("error", e.getMessage());
+        }
+
+        return systemInfo;
+    }
+
+    /**
+     * Versione con timeout ridotto per il monitoraggio SSE
+     */
+    private Map<String, String> getWindowsSystemInfoQuick(String ipAddress) {
+        Map<String, String> info = new HashMap<>();
+        JSch jsch = new JSch();
+        Session session = null;
+
+        try {
+            PcMappingConfig.Ssh sshConfig = pcMappingConfig.getSsh();
+
+            session = jsch.getSession(sshConfig.getUsername(), ipAddress, sshConfig.getPort());
+            session.setPassword(sshConfig.getPassword());
+            session.setConfig("StrictHostKeyChecking", "no");
+
+            // Timeout ridotto per SSE (5 secondi invece di 30)
+            session.connect(5000);
+
+            // Comando PowerShell semplificato per velocità
+            String command = "powershell.exe -Command \"" +
+                "$cpu = (Get-WmiObject -Class Win32_Processor).LoadPercentage; " +
+                "if ($cpu -ne $null -and $cpu -gt 0) { Write-Host \"CPU:$cpu\" } else { Write-Host 'CPU:0' }; " +
+                "$os = Get-WmiObject -Class Win32_OperatingSystem; " +
+                "if ($os -ne $null) { " +
+                "  $totalKB = $os.TotalVisibleMemorySize; " +
+                "  $freeKB = $os.FreePhysicalMemory; " +
+                "  if ($totalKB -gt 0 -and $freeKB -gt 0) { " +
+                "    $percent = [math]::Round((($totalKB - $freeKB) / $totalKB) * 100, 2); " +
+                "    Write-Host \"RAM:$percent\"; " +
+                "  } else { Write-Host 'RAM:0' }; " +
+                "} else { Write-Host 'RAM:0' }\"";
+
+            ChannelExec channelExec = (ChannelExec) session.openChannel("exec");
+            channelExec.setCommand(command);
+
+            BufferedReader reader = new BufferedReader(new InputStreamReader(channelExec.getInputStream()));
+            channelExec.connect();
+
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.startsWith("CPU:")) {
+                    String cpuValue = line.substring(4);
+                    info.put("cpuUsage", cpuValue + "%");
+                } else if (line.startsWith("RAM:")) {
+                    String ramValue = line.substring(4);
+                    info.put("ramUsage", ramValue + "%");
+                }
+            }
+
+            channelExec.disconnect();
+
+        } catch (Exception e) {
+            String errorMsg = e.getMessage();
+            if (errorMsg != null && (errorMsg.contains("timeout") || errorMsg.contains("ConnectException"))) {
+                info.put("error", "SSH timeout - PC potrebbe essere spento");
+            } else {
+                info.put("error", "Errore SSH: " + errorMsg);
+            }
+        } finally {
+            if (session != null && session.isConnected()) {
+                session.disconnect();
+            }
+        }
+
+        return info;
+    }
+
+    /**
+     * Versione ultra-veloce per controlli immediati dopo spegnimento
+     * Utilizza timeout molto ridotti per rilevare rapidamente dispositivi offline
+     */
+    public Map<String, String> getSystemInfoUltraFast(String ipAddress) {
+        Map<String, String> systemInfo = new HashMap<>();
+
+        try {
+            // Ping ultra-veloce (solo 500ms)
+            String ping = getPingFast(ipAddress);
+            systemInfo.put("ping", ping);
+
+            // Se il ping fallisce, non tentare nemmeno SSH
+            if (ping.contains("Ping non disponibile") || ping.contains("Errore")) {
+                systemInfo.put("cpuUsage", "N/A");
+                systemInfo.put("ramUsage", "N/A");
+                systemInfo.put("error", "PC offline - rilevato tramite ping");
+                return systemInfo;
+            }
+
+            // SSH ultra-veloce solo se ping ha successo
+            Map<String, String> windowsInfo = getWindowsSystemInfoUltraFast(ipAddress);
+            systemInfo.putAll(windowsInfo);
+
+        } catch (Exception e) {
+            systemInfo.put("error", "PC offline - " + e.getMessage());
+            systemInfo.put("cpuUsage", "N/A");
+            systemInfo.put("ramUsage", "N/A");
+        }
+
+        return systemInfo;
+    }
+
+    /**
+     * Ping ultra-veloce con timeout di soli 500ms
+     */
+    private String getPingFast(String ipAddress) {
+        try {
+            ProcessBuilder pb = new ProcessBuilder("ping", "-c", "1", "-W", "500", ipAddress);
+            Process process = pb.start();
+
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            String line;
+
+            while ((line = reader.readLine()) != null) {
+                Pattern pattern = Pattern.compile("time=(\\d+\\.?\\d*)\\s*ms");
+                Matcher matcher = pattern.matcher(line);
+                if (matcher.find()) {
+                    return matcher.group(1) + " ms";
+                }
+            }
+
+            process.waitFor();
+            return "Ping non disponibile";
+
+        } catch (Exception e) {
+            return "Errore ping: " + e.getMessage();
+        }
+    }
+
+    /**
+     * SSH ultra-veloce con timeout di soli 2 secondi
+     */
+    private Map<String, String> getWindowsSystemInfoUltraFast(String ipAddress) {
+        Map<String, String> info = new HashMap<>();
+        JSch jsch = new JSch();
+        Session session = null;
+
+        try {
+            PcMappingConfig.Ssh sshConfig = pcMappingConfig.getSsh();
+
+            session = jsch.getSession(sshConfig.getUsername(), ipAddress, sshConfig.getPort());
+            session.setPassword(sshConfig.getPassword());
+            session.setConfig("StrictHostKeyChecking", "no");
+
+            // Timeout ultra-ridotto (2 secondi)
+            session.connect(2000);
+
+            // Comando PowerShell minimale per velocità massima
+            String command = "powershell.exe -Command \"" +
+                "$cpu = (Get-WmiObject -Class Win32_Processor).LoadPercentage; " +
+                "Write-Host \"CPU:$cpu\"; " +
+                "$os = Get-WmiObject -Class Win32_OperatingSystem; " +
+                "$percent = [math]::Round((($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) / $os.TotalVisibleMemorySize) * 100, 2); " +
+                "Write-Host \"RAM:$percent\"\"";
+
+            ChannelExec channelExec = (ChannelExec) session.openChannel("exec");
+            channelExec.setCommand(command);
+
+            BufferedReader reader = new BufferedReader(new InputStreamReader(channelExec.getInputStream()));
+            channelExec.connect();
+
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.startsWith("CPU:")) {
+                    String cpuValue = line.substring(4);
+                    info.put("cpuUsage", cpuValue + "%");
+                } else if (line.startsWith("RAM:")) {
+                    String ramValue = line.substring(4);
+                    info.put("ramUsage", ramValue + "%");
+                }
+            }
+
+            channelExec.disconnect();
+
+        } catch (Exception e) {
+            String errorMsg = e.getMessage();
+            if (errorMsg != null && (errorMsg.contains("timeout") || errorMsg.contains("ConnectException"))) {
+                info.put("error", "SSH timeout ultra-veloce - PC spento");
+            } else {
+                info.put("error", "Errore SSH ultra-veloce: " + errorMsg);
+            }
+            info.put("cpuUsage", "N/A");
+            info.put("ramUsage", "N/A");
+        } finally {
+            if (session != null && session.isConnected()) {
+                session.disconnect();
+            }
+        }
+
+        return info;
+    }
 }

@@ -27,13 +27,13 @@ public class PcStatusService {
 
     public boolean isPcOnline(String ipAddress) {
         try {
-            // Prova prima con il metodo nativo Java
+            // Prova prima con il metodo nativo Java con timeout ridotto
             InetAddress inet = InetAddress.getByName(ipAddress);
-            if (inet.isReachable(3000)) {
+            if (inet.isReachable(1500)) { // Ridotto da 3000 a 1500ms
                 return true;
             }
 
-            // Se il metodo nativo fallisce, usa il comando ping esterno
+            // Se il metodo nativo fallisce, usa il comando ping esterno con timeout più basso
             return pingWithCommand(ipAddress);
 
         } catch (Exception e) {
@@ -44,8 +44,8 @@ public class PcStatusService {
 
     private boolean pingWithCommand(String ipAddress) {
         try {
-            // Comando ping per macOS/Linux: ping -c 3 -W 5000 IP
-            ProcessBuilder processBuilder = new ProcessBuilder("ping", "-c", "3", "-W", "5000", ipAddress);
+            // Comando ping per macOS/Linux: ping -c 2 -W 2000 IP (ridotto timeout e tentativi)
+            ProcessBuilder processBuilder = new ProcessBuilder("ping", "-c", "2", "-W", "2000", ipAddress);
             Process process = processBuilder.start();
 
             BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
@@ -67,6 +67,19 @@ public class PcStatusService {
 
         } catch (Exception e) {
             System.err.println("Errore durante ping command per " + ipAddress + ": " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Versione ultra-veloce del ping per controlli immediati dopo spegnimento
+     */
+    public boolean isPcOnlineFast(String ipAddress) {
+        try {
+            // Timeout molto ridotto per controllo veloce
+            InetAddress inet = InetAddress.getByName(ipAddress);
+            return inet.isReachable(800); // Solo 800ms di timeout
+        } catch (Exception e) {
             return false;
         }
     }
