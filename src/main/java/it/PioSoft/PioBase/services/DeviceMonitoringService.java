@@ -216,6 +216,14 @@ public class DeviceMonitoringService {
         return status;
     }
 
+    /**
+     * Aggiorna e broadcast lo stato di un dispositivo (usato anche per IP cam)
+     */
+    public void updateDeviceStatus(String ipAddress, Map<String, Object> status) {
+        deviceStatusCache.put(ipAddress, status);
+        broadcastToDevice(ipAddress, status);
+    }
+
     private void broadcastToDevice(String ipAddress, Map<String, Object> status) {
         List<SseEmitter> emitters = deviceEmitters.get(ipAddress);
         if (emitters != null) {
