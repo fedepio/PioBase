@@ -251,6 +251,17 @@ public class PersonalPcController {
     }
 
     /**
+     * Endpoint unificato per monitoraggio combinato PC + IP Camera
+     * Invia aggiornamenti SSE con entrambi gli stati in un unico evento
+     * GET /api/monitor/system/{pcIp}
+     */
+    @GetMapping(value = "/monitor/system/{pcIp}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter monitorSystem(@PathVariable String pcIp) {
+        System.out.println("Client connesso per monitoraggio combinato PC+Cam - PC IP: " + pcIp);
+        return deviceMonitoringService.subscribeToSystemStatus(pcIp);
+    }
+
+    /**
      * Endpoint per monitorare la IP cam tramite SSE
      * Il client si sottoscrive e riceve aggiornamenti automatici sullo stato della cam
      */

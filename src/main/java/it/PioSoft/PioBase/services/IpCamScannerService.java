@@ -34,6 +34,8 @@ public class IpCamScannerService {
 
     public IpCamScannerService(DeviceMonitoringService monitoringService) {
         this.monitoringService = monitoringService;
+        // Registra questo service nel monitoring service per evitare dipendenze circolari
+        monitoringService.setIpCamScannerService(this);
         initializeConfigDirectory();
         loadCamIpFromConfig();
     }

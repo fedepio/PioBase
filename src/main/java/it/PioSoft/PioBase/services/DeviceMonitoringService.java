@@ -16,12 +16,24 @@ public class DeviceMonitoringService {
     private final Map<String, List<SseEmitter>> deviceEmitters = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> deviceStatusCache = new ConcurrentHashMap<>();
 
+    // Nuovi emitters per monitoraggio combinato PC + IP Cam
+    private final List<SseEmitter> combinedEmitters = new CopyOnWriteArrayList<>();
+    private Map<String, Object> lastCombinedStatus = new HashMap<>();
+
     private final PcStatusService pcStatusService;
     private final SystemInfoService systemInfoService;
+
+    // Riferimento all'IpCamScannerService (sarà iniettato)
+    private IpCamScannerService ipCamScannerService;
 
     public DeviceMonitoringService(PcStatusService pcStatusService, SystemInfoService systemInfoService) {
         this.pcStatusService = pcStatusService;
         this.systemInfoService = systemInfoService;
+    }
+
+    // Setter per dependency injection circolare
+    public void setIpCamScannerService(IpCamScannerService ipCamScannerService) {
+        this.ipCamScannerService = ipCamScannerService;
     }
 
     public SseEmitter subscribeToDevice(String ipAddress) {
@@ -236,5 +248,144 @@ public class DeviceMonitoringService {
                 }
             });
         }
+    }
+
+    /**
+     * Sottoscrizione per monitoraggio combinato PC + IP Cam
+     * Invia aggiornamenti unificati con entrambi gli stati
+     */
+    public SseEmitter subscribeToSystemStatus(String pcIpAddress) {
+        SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
+        combinedEmitters.add(emitter);
+
+        emitter.onCompletion(() -> combinedEmitters.remove(emitter));
+        emitter.onTimeout(() -> combinedEmitters.remove(emitter));
+        emitter.onError(e -> combinedEmitters.remove(emitter));
+
+        // Invia stato corrente se disponibile
+        if (!lastCombinedStatus.isEmpty()) {
+            try {
+                emitter.send(SseEmitter.event().name("systemStatus").data(lastCombinedStatus));
+            } catch (IOException e) {
+                combinedEmitters.remove(emitter);
+            }
+        } else {
+            // Invia stato iniziale immediato
+            try {
+                Map<String, Object> initialStatus = buildCombinedStatus(pcIpAddress);
+                emitter.send(SseEmitter.event().name("systemStatus").data(initialStatus));
+            } catch (IOException e) {
+                combinedEmitters.remove(emitter);
+            }
+        }
+
+        System.out.println("Client sottoscritto a monitoraggio combinato PC+Cam. Clients attivi: " + combinedEmitters.size());
+        return emitter;
+    }
+
+    /**
+     * Polling schedulato per monitoraggio combinato (ogni 2 secondi)
+     */
+    @Scheduled(fixedDelay = 2000)
+    public void checkCombinedStatus() {
+        if (combinedEmitters.isEmpty()) {
+            return; // Nessun client connesso, skip
+        }
+
+        // Ottieni l'IP del PC dalla cache o usa default
+        String pcIp = getPcIpFromCache();
+        if (pcIp == null) {
+            return; // Nessun PC da monitorare
+        }
+
+        Map<String, Object> combinedStatus = buildCombinedStatus(pcIp);
+
+        // Broadcast solo se ci sono cambiamenti
+        if (!combinedStatus.equals(lastCombinedStatus)) {
+            lastCombinedStatus = new HashMap<>(combinedStatus);
+            broadcastCombinedStatus(combinedStatus);
+            System.out.println("Stato combinato aggiornato - PC: " + combinedStatus.get("pcOnline") +
+                             ", Cam: " + combinedStatus.get("camOnline"));
+        }
+    }
+
+    /**
+     * Forza un controllo immediato dello stato combinato
+     */
+    public void forceCombinedStatusCheck(String pcIpAddress) {
+        System.out.println("Forzando controllo stato combinato per PC: " + pcIpAddress);
+        Map<String, Object> combinedStatus = buildCombinedStatus(pcIpAddress);
+        lastCombinedStatus = new HashMap<>(combinedStatus);
+        broadcastCombinedStatus(combinedStatus);
+    }
+
+    /**
+     * Costruisce lo stato combinato di PC e IP Cam
+     */
+    private Map<String, Object> buildCombinedStatus(String pcIpAddress) {
+        Map<String, Object> combined = new HashMap<>();
+        combined.put("timestamp", System.currentTimeMillis());
+
+        // Stato del PC
+        Map<String, Object> pcStatus = getDeviceStatus(pcIpAddress);
+        combined.put("pcIp", pcIpAddress);
+        combined.put("pcOnline", pcStatus.getOrDefault("online", false));
+        combined.put("pcHostname", pcStatus.getOrDefault("hostname", "N/A"));
+        combined.put("pcOs", pcStatus.getOrDefault("os", "N/A"));
+        combined.put("pcUptime", pcStatus.getOrDefault("uptime", "N/A"));
+
+        if (pcStatus.containsKey("systemInfoError")) {
+            combined.put("pcError", pcStatus.get("systemInfoError"));
+        }
+
+        // Stato della IP Cam
+        String camIp = ipCamScannerService != null ? ipCamScannerService.getCurrentCamIp() : null;
+        if (camIp != null && !camIp.isEmpty()) {
+            Map<String, Object> camStatus = getDeviceStatus(camIp);
+            combined.put("camIp", camIp);
+            combined.put("camOnline", camStatus.getOrDefault("online", false));
+            combined.put("camRtspUrl", "rtsp://" + camIp + ":554/");
+
+            if (camStatus.containsKey("systemInfoError")) {
+                combined.put("camError", camStatus.get("systemInfoError"));
+            }
+        } else {
+            combined.put("camIp", null);
+            combined.put("camOnline", false);
+            combined.put("camError", "IP cam non ancora trovata");
+        }
+
+        return combined;
+    }
+
+    /**
+     * Broadcast dello stato combinato a tutti i client sottoscritti
+     */
+    private void broadcastCombinedStatus(Map<String, Object> status) {
+        combinedEmitters.removeIf(emitter -> {
+            try {
+                emitter.send(SseEmitter.event().name("systemStatus").data(status));
+                return false;
+            } catch (IOException e) {
+                System.out.println("Errore invio SSE, rimuovo emitter");
+                return true;
+            }
+        });
+    }
+
+    /**
+     * Ottiene l'IP del PC dalla cache dei dispositivi monitorati
+     */
+    private String getPcIpFromCache() {
+        // Prende il primo IP nella cache che non è la cam
+        String camIp = ipCamScannerService != null ? ipCamScannerService.getCurrentCamIp() : null;
+
+        for (String ip : deviceStatusCache.keySet()) {
+            if (camIp == null || !ip.equals(camIp)) {
+                return ip;
+            }
+        }
+
+        return null;
     }
 }
