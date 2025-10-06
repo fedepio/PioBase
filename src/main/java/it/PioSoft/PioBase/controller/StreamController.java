@@ -1,6 +1,7 @@
 package it.PioSoft.PioBase.controller;
 
 import it.PioSoft.PioBase.services.HlsStreamService;
+import it.PioSoft.PioBase.services.WebRtcStreamService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -29,6 +31,9 @@ public class StreamController {
 
     @Autowired
     private HlsStreamService hlsStreamService;
+
+    @Autowired
+    private WebRtcStreamService webRtcStreamService;
 
     /**
      * Avvia lo streaming HLS da URL RTSP fornito
@@ -105,14 +110,75 @@ public class StreamController {
     }
 
     /**
+     * Endpoint intelligente per ottenere l'URL HLS migliore disponibile
+     * Restituisce MediaMTX HLS se attivo, altrimenti FFmpeg HLS
+     * GET /api/stream/best-hls-url
+     */
+    @GetMapping("/best-hls-url")
+    public ResponseEntity<Map<String, Object>> getBestHlsUrl() {
+        Map<String, Object> result = new HashMap<>();
+
+        // Verifica MediaMTX (priorità)
+        Map<String, Object> webrtcStatus = webRtcStreamService.getStatus();
+        boolean isMediaMtxRunning = (Boolean) webrtcStatus.getOrDefault("isRunning", false);
+
+        if (isMediaMtxRunning) {
+            result.put("available", true);
+            result.put("provider", "MediaMTX");
+            result.put("hlsUrl", "http://localhost:8890/cam/index.m3u8");
+            result.put("latency", "2-6 seconds");
+            result.put("recommended", true);
+            result.put("note", "HLS nativo MediaMTX - ottimale per latenza e performance");
+            logger.debug("Best HLS URL: MediaMTX nativo");
+            return ResponseEntity.ok(result);
+        }
+
+        // Fallback su FFmpeg
+        Map<String, Object> streamStatus = hlsStreamService.getStreamStatus();
+        boolean isFfmpegStreaming = (Boolean) streamStatus.getOrDefault("isStreaming", false);
+
+        if (isFfmpegStreaming) {
+            result.put("available", true);
+            result.put("provider", "FFmpeg");
+            result.put("hlsUrl", "http://localhost:8080/api/stream/hls/stream.m3u8");
+            result.put("latency", "4-10 seconds");
+            result.put("recommended", false);
+            result.put("note", "HLS FFmpeg attivo. Per migliori performance, considera MediaMTX");
+            logger.debug("Best HLS URL: FFmpeg");
+            return ResponseEntity.ok(result);
+        }
+
+        // Nessuno stream disponibile
+        result.put("available", false);
+        result.put("message", "Nessuno stream HLS attivo");
+        result.put("suggestions", Map.of(
+            "mediamtx", "POST /api/webrtc/start (raccomandato)",
+            "ffmpeg", "GET /api/stream/start-auto"
+        ));
+        logger.debug("Nessuno stream HLS disponibile");
+        return ResponseEntity.status(503).body(result);
+    }
+
+    /**
      * Serve i file HLS (playlist .m3u8 e segmenti .ts)
      * GET /api/stream/hls/stream.m3u8
      * GET /api/stream/hls/segment001.ts
      * Ottimizzato per iOS e Android con headers corretti
+     *
+     * NOTA: Questo endpoint serve l'HLS generato da FFmpeg.
+     * Se stai usando MediaMTX, l'HLS nativo è disponibile su http://localhost:8890/cam/
      */
     @GetMapping("/hls/{filename:.+}")
     public ResponseEntity<Resource> serveHlsFile(@PathVariable String filename) {
         try {
+            // Verifica prima se lo stream è attivo
+            Map<String, Object> streamStatus = hlsStreamService.getStreamStatus();
+            boolean isStreaming = (Boolean) streamStatus.getOrDefault("isStreaming", false);
+
+            // Verifica anche se MediaMTX è attivo (HLS alternativo)
+            Map<String, Object> webrtcStatus = webRtcStreamService.getStatus();
+            boolean isMediaMtxRunning = (Boolean) webrtcStatus.getOrDefault("isRunning", false);
+
             Path filePath = Paths.get(hlsStreamService.getHlsDirectory(), filename);
             Resource resource = new UrlResource(filePath.toUri());
 
@@ -144,8 +210,30 @@ public class StreamController {
                     .body(resource);
             }
 
-            logger.warn("File HLS non trovato o non leggibile: {}", filename);
-            return ResponseEntity.notFound().build();
+            // File non trovato - distingui tra varie situazioni
+            if (!isStreaming && !isMediaMtxRunning) {
+                // Nessuno stream attivo
+                logger.debug("Richiesta file HLS '{}' ma nessuno stream attivo (né FFmpeg né MediaMTX)", filename);
+                return ResponseEntity.status(503) // Service Unavailable
+                    .header("X-Stream-Status", "inactive")
+                    .header("X-Stream-Message", "Nessuno stream attivo. Usa POST /api/stream/start-auto (FFmpeg) o POST /api/webrtc/start (MediaMTX)")
+                    .build();
+            } else if (!isStreaming && isMediaMtxRunning) {
+                // MediaMTX attivo ma FFmpeg no - suggerisci HLS nativo di MediaMTX
+                logger.debug("Richiesta file HLS FFmpeg '{}' ma solo MediaMTX è attivo. Suggerisco HLS nativo MediaMTX", filename);
+                return ResponseEntity.status(503)
+                    .header("X-Stream-Status", "ffmpeg-inactive-mediamtx-active")
+                    .header("X-Stream-Message", "FFmpeg HLS non attivo. Usa HLS nativo MediaMTX su http://localhost:8890/cam/index.m3u8")
+                    .header("X-MediaMTX-HLS-URL", "http://localhost:8890/cam/index.m3u8")
+                    .build();
+            } else {
+                // Stream FFmpeg attivo ma file mancante
+                logger.warn("File HLS '{}' non trovato nonostante stream FFmpeg sia attivo", filename);
+                return ResponseEntity.status(404)
+                    .header("X-Stream-Status", "active-but-file-missing")
+                    .header("X-Stream-Message", "Stream attivo ma file non disponibile. Potrebbe essere in generazione...")
+                    .build();
+            }
 
         } catch (Exception e) {
             logger.error("Errore serving file HLS: {}", filename, e);
