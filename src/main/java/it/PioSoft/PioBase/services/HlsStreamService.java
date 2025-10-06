@@ -93,10 +93,16 @@ public class HlsStreamService {
                     while ((line = reader.readLine()) != null) {
                         logger.debug("FFmpeg: {}", line);
                     }
+                    logger.debug("FFmpeg output stream terminato normalmente");
                 } catch (IOException e) {
-                    logger.error("Errore lettura output FFmpeg", e);
+                    // Se il processo è stato terminato, ignora l'errore "Stream closed"
+                    if (ffmpegProcess != null && ffmpegProcess.isAlive()) {
+                        logger.error("Errore lettura output FFmpeg", e);
+                    } else {
+                        logger.debug("Stream FFmpeg chiuso (processo terminato)");
+                    }
                 }
-            }).start();
+            }, "FFmpeg-Output-Reader").start();
 
             // Attendi che FFmpeg generi il primo file
             int attempts = 0;
