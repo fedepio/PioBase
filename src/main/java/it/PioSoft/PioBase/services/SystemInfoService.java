@@ -138,9 +138,6 @@ public class SystemInfoService {
                 "}; " +
                 "Write-Host 'END_DATA'\"";
 
-            System.out.println("=== DEBUG: Comando PowerShell ===");
-            System.out.println(command);
-
             ChannelExec channelExec = (ChannelExec) session.openChannel("exec");
             channelExec.setCommand(command);
 
@@ -155,16 +152,12 @@ public class SystemInfoService {
             double freeRam = 0;
             double totalRam = 0;
 
-            System.out.println("=== DEBUG: Lettura output PowerShell ===");
-
             while ((line = reader.readLine()) != null) {
-                System.out.println("DEBUG: Linea ricevuta: '" + line + "'");
 
                 if (line.startsWith("CPU:")) {
                     try {
                         String cpuValue = line.substring(4);
                         cpuUsage = Double.parseDouble(cpuValue);
-                        System.out.println("DEBUG: CPU Usage parsato: " + cpuUsage);
                     } catch (Exception e) {
                         System.err.println("Errore parsing CPU: " + e.getMessage());
                     }
@@ -172,7 +165,6 @@ public class SystemInfoService {
                     try {
                         String ramValue = line.substring(12);
                         ramUsagePercent = Double.parseDouble(ramValue);
-                        System.out.println("DEBUG: RAM Usage % parsato: " + ramUsagePercent);
                     } catch (Exception e) {
                         System.err.println("Errore parsing RAM %: " + e.getMessage());
                     }
@@ -180,7 +172,6 @@ public class SystemInfoService {
                     try {
                         String freeValue = line.substring(9);
                         freeRam = Double.parseDouble(freeValue);
-                        System.out.println("DEBUG: Free RAM parsato: " + freeRam);
                     } catch (Exception e) {
                         System.err.println("Errore parsing Free RAM: " + e.getMessage());
                     }
@@ -188,7 +179,6 @@ public class SystemInfoService {
                     try {
                         String totalValue = line.substring(10);
                         totalRam = Double.parseDouble(totalValue);
-                        System.out.println("DEBUG: Total RAM parsato: " + totalRam);
                     } catch (Exception e) {
                         System.err.println("Errore parsing Total RAM: " + e.getMessage());
                     }
@@ -202,7 +192,6 @@ public class SystemInfoService {
 
             // Validazione dei valori
             if (cpuUsage < 0 || cpuUsage > 100) {
-                System.out.println("DEBUG: CPU usage fuori range, tentando comando alternativo...");
                 cpuUsage = getCpuUsageAlternative(session);
             }
 
@@ -219,11 +208,6 @@ public class SystemInfoService {
             info.put("availableRam", String.format("%.0f MB", freeRam));
             info.put("totalRam", String.format("%.0f MB", totalRam));
 
-            System.out.println("=== DEBUG: Valori finali ===");
-            System.out.println("CPU: " + cpuUsage + "%");
-            System.out.println("RAM Usage: " + ramUsagePercent + "%");
-            System.out.println("Free RAM: " + freeRam + " MB");
-            System.out.println("Total RAM: " + totalRam + " MB");
 
             // Leggi eventuali errori
             String errorLine;

@@ -86,7 +86,6 @@ public class PcStatusService {
 
     public String getPcStatus(String ipAddress) {
         boolean online = isPcOnline(ipAddress);
-        System.out.println("Status check per " + ipAddress + ": " + (online ? "online" : "offline"));
         return online ? "online" : "offline";
     }
 }

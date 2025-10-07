@@ -206,10 +206,6 @@ public class IpCamScannerService {
                     currentCamIp, timeSinceLastScan / 60000);
                 lastScanTime = System.currentTimeMillis();
                 scanAndSaveCamIp();
-            } else {
-                long minutesRemaining = (RESCAN_INTERVAL_MS - timeSinceLastScan) / 60000;
-                logger.debug("Cam {} è offline, ma prossima scansione tra {} minuti",
-                    currentCamIp, minutesRemaining);
             }
         }
     }
@@ -240,9 +236,6 @@ public class IpCamScannerService {
         // Utilizza il metodo broadcast del DeviceMonitoringService
         // tramite riflessione o esponendo un metodo pubblico
         try {
-            // Per ora usiamo un approccio diretto
-            logger.debug("Stato cam {}: {}", ipAddress, status.get("online"));
-
             // Il DeviceMonitoringService gestirà il broadcast tramite SSE
             monitoringService.updateDeviceStatus(ipAddress, status);
 
