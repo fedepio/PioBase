@@ -326,7 +326,7 @@ public class DeviceMonitoringService {
         Map<String, Object> combined = new HashMap<>();
         combined.put("timestamp", System.currentTimeMillis());
 
-        // Stato del PC
+        // Stato del PC (con SSH)
         Map<String, Object> pcStatus = getDeviceStatus(pcIpAddress);
         combined.put("pcIp", pcIpAddress);
         combined.put("pcOnline", pcStatus.getOrDefault("online", false));
@@ -338,16 +338,16 @@ public class DeviceMonitoringService {
             combined.put("pcError", pcStatus.get("systemInfoError"));
         }
 
-        // Stato della IP Cam
+        // Stato della IP Cam (solo ping, NO SSH)
         String camIp = ipCamScannerService != null ? ipCamScannerService.getCurrentCamIp() : null;
         if (camIp != null && !camIp.isEmpty()) {
-            Map<String, Object> camStatus = getDeviceStatus(camIp);
+            Map<String, Object> camStatus = getCameraStatus(camIp);
             combined.put("camIp", camIp);
             combined.put("camOnline", camStatus.getOrDefault("online", false));
             combined.put("camRtspUrl", "rtsp://" + camIp + ":554/");
 
-            if (camStatus.containsKey("systemInfoError")) {
-                combined.put("camError", camStatus.get("systemInfoError"));
+            if (camStatus.containsKey("error")) {
+                combined.put("camError", camStatus.get("error"));
             }
         } else {
             combined.put("camIp", null);
@@ -356,6 +356,30 @@ public class DeviceMonitoringService {
         }
 
         return combined;
+    }
+
+    /**
+     * Ottiene lo stato della camera IP (solo ping, senza SSH)
+     */
+    private Map<String, Object> getCameraStatus(String ipAddress) {
+        Map<String, Object> status = new HashMap<>();
+        status.put("ip", ipAddress);
+        status.put("timestamp", System.currentTimeMillis());
+
+        try {
+            // Solo ping veloce, NO SSH per le camere
+            boolean isOnline = pcStatusService.isPcOnlineFast(ipAddress);
+            status.put("online", isOnline);
+
+            if (!isOnline) {
+                status.put("error", "Camera offline - ping fallito");
+            }
+        } catch (Exception e) {
+            status.put("online", false);
+            status.put("error", "Errore controllo camera: " + e.getMessage());
+        }
+
+        return status;
     }
 
     /**
