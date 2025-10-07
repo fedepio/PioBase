@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IP Cam HLS Streaming - Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        button.stop {
+            background: #dc3545;
+        }
+        button.stop:hover {
+            background: #c82333;
+        }
+        #video {
+            width: 100%;
+            max-width: 100%;
+            background: #000;
+            border-radius: 4px;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .status.online {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.offline {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.loading {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeeba;
+        }
+        .info {
+            background: #e7f3ff;
+            padding: 15px;
+            border-radius: 4px;
+            border-left: 4px solid #007bff;
+            margin-bottom: 20px;
+        }
+        .info h3 {
+            margin-top: 0;
+        }
+        .info code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+        #log {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 4px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .log-entry {
+            margin: 3px 0;
+        }
+        .log-error {
+            color: #f48771;
+        }
+        .log-success {
+            color: #89d185;
+        }
+        .log-info {
+            color: #569cd6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎥 IP Camera HLS Streaming</h1>
+
+        <div id="camStatus" class="status loading">
+            📡 Rilevamento IP camera in corso...
+        </div>
+
+        <div class="info">
+            <h3>ℹ️ Informazioni</h3>
+            <p><strong>IP Cam:</strong> <span id="camIp">Ricerca in corso...</span></p>
+            <p><strong>RTSP URL:</strong> <code id="rtspUrl">-</code></p>
+            <p><strong>Stream Status:</strong> <span id="streamStatus">Inattivo</span></p>
+        </div>
+
+        <div class="controls">
+            <button id="btnStartAuto" onclick="startStreamAuto()">▶️ Avvia Stream Automatico</button>
+            <button id="btnStop" onclick="stopStream()" class="stop" disabled>⏹️ Ferma Stream</button>
+            <button onclick="checkStatus()">🔄 Aggiorna Stato</button>
+            <button onclick="forceScan()">🔍 Ri-scansiona Rete</button>
+        </div>
+
+        <video id="video" controls autoplay muted></video>
+    </div>
+
+    <div class="container">
+        <h3>📋 Log</h3>
+        <div id="log"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8080/api';
+        let hls = null;
+        let camEventSource = null;
+
+        // Log colorato
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            const timestamp = new Date().toLocaleTimeString();
+            entry.textContent = `[${timestamp}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        // Monitora IP cam via SSE
+        function monitorIpCam() {
+            if (camEventSource) {
+                camEventSource.close();
+            }
+
+            camEventSource = new EventSource(`${API_BASE}/ipcam/monitor`);
+
+            camEventSource.addEventListener('status', (event) => {
+                const data = JSON.parse(event.data);
+                console.log('Cam status:', data);
+
+                const statusDiv = document.getElementById('camStatus');
+                const camIpSpan = document.getElementById('camIp');
+                const rtspUrlCode = document.getElementById('rtspUrl');
+
+                if (data.online) {
+                    statusDiv.className = 'status online';
+                    statusDiv.textContent = '✅ IP Camera ONLINE';
+                    camIpSpan.textContent = data.ip;
+                    rtspUrlCode.textContent = data.rtspUrl || `rtsp://${data.ip}:554/`;
+                    log(`Cam online: ${data.ip}`, 'success');
+                } else {
+                    statusDiv.className = 'status offline';
+                    statusDiv.textContent = '❌ IP Camera OFFLINE - Ricerca in corso...';
+                    camIpSpan.textContent = 'Ricerca in corso...';
+                    rtspUrlCode.textContent = '-';
+                    log('Cam offline, ricerca in corso...', 'error');
+                }
+            });
+
+            camEventSource.onerror = (error) => {
+                console.error('SSE Error:', error);
+                log('Errore connessione SSE', 'error');
+            };
+        }
+
+        // Avvia stream automatico
+        async function startStreamAuto() {
+            log('Richiesta avvio stream automatico...', 'info');
+
+            try {
+                const response = await fetch(`${API_BASE}/stream/start-auto`, {
+                    method: 'POST'
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    log('Stream avviato con successo!', 'success');
+                    document.getElementById('streamStatus').textContent = '🟢 Attivo';
+                    document.getElementById('btnStartAuto').disabled = true;
+                    document.getElementById('btnStop').disabled = false;
+
+                    // Avvia player HLS
+                    setTimeout(() => startHlsPlayer(result.playlistUrl), 1000);
+                } else {
+                    log(`Errore: ${result.message}`, 'error');
+                    alert(result.message + '\n' + (result.suggestion || ''));
+                }
+            } catch (error) {
+                log(`Errore avvio stream: ${error.message}`, 'error');
+                alert('Errore comunicazione con server');
+            }
+        }
+
+        // Ferma stream
+        async function stopStream() {
+            log('Fermo stream...', 'info');
+
+            try {
+                const response = await fetch(`${API_BASE}/stream/stop`);
+                const result = await response.json();
+
+                log(result.message, 'success');
+                document.getElementById('streamStatus').textContent = '⭕ Inattivo';
+                document.getElementById('btnStartAuto').disabled = false;
+                document.getElementById('btnStop').disabled = true;
+
+                // Ferma player
+                if (hls) {
+                    hls.destroy();
+                    hls = null;
+                }
+                document.getElementById('video').src = '';
+            } catch (error) {
+                log(`Errore stop stream: ${error.message}`, 'error');
+            }
+        }
+
+        // Controlla stato stream
+        async function checkStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/stream/status`);
+                const status = await response.json();
+
+                console.log('Stream status:', status);
+                log(`Stream attivo: ${status.isStreaming}`, 'info');
+
+                if (status.isStreaming) {
+                    document.getElementById('streamStatus').textContent = '🟢 Attivo';
+                    document.getElementById('btnStartAuto').disabled = true;
+                    document.getElementById('btnStop').disabled = false;
+                } else {
+                    document.getElementById('streamStatus').textContent = '⭕ Inattivo';
+                    document.getElementById('btnStartAuto').disabled = false;
+                    document.getElementById('btnStop').disabled = true;
+                }
+            } catch (error) {
+                log(`Errore controllo stato: ${error.message}`, 'error');
+            }
+        }
+
+        // Forza scansione rete
+        async function forceScan() {
+            log('Avvio scansione rete...', 'info');
+
+            try {
+                const response = await fetch(`${API_BASE}/ipcam/scan`, {
+                    method: 'POST'
+                });
+                const text = await response.text();
+                log(text, 'success');
+            } catch (error) {
+                log(`Errore scansione: ${error.message}`, 'error');
+            }
+        }
+
+        // Avvia player HLS con hls.js
+        function startHlsPlayer(playlistUrl) {
+            const video = document.getElementById('video');
+            const fullUrl = `${API_BASE}/stream${playlistUrl}`;
+
+            log(`Caricamento stream: ${fullUrl}`, 'info');
+
+            if (Hls.isSupported()) {
+                if (hls) {
+                    hls.destroy();
+                }
+
+                hls = new Hls({
+                    debug: false,
+                    enableWorker: true,
+                    lowLatencyMode: true,
+                    backBufferLength: 90
+                });
+
+                hls.loadSource(fullUrl);
+                hls.attachMedia(video);
+
+                hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                    log('Stream HLS pronto, riproduzione...', 'success');
+                    video.play().catch(e => {
+                        log('Errore autoplay (clicca play manualmente)', 'error');
+                    });
+                });
+
+                hls.on(Hls.Events.ERROR, (event, data) => {
+                    if (data.fatal) {
+                        log(`Errore fatale HLS: ${data.type}`, 'error');
+                        switch (data.type) {
+                            case Hls.ErrorTypes.NETWORK_ERROR:
+                                log('Tentativo recupero errore rete...', 'info');
+                                hls.startLoad();
+                                break;
+                            case Hls.ErrorTypes.MEDIA_ERROR:
+                                log('Tentativo recupero errore media...', 'info');
+                                hls.recoverMediaError();
+                                break;
+                            default:
+                                log('Errore non recuperabile', 'error');
+                                hls.destroy();
+                                break;
+                        }
+                    }
+                });
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                // Supporto nativo HLS (Safari)
+                video.src = fullUrl;
+                video.addEventListener('loadedmetadata', () => {
+                    log('Stream HLS caricato (nativo)', 'success');
+                    video.play();
+                });
+            } else {
+                log('Browser non supporta HLS', 'error');
+                alert('Il tuo browser non supporta HLS streaming');
+            }
+        }
+
+        // Inizializzazione
+        window.onload = () => {
+            log('Applicazione avviata', 'success');
+            monitorIpCam();
+            checkStatus();
+        };
+
+        // Cleanup
+        window.onbeforeunload = () => {
+            if (camEventSource) {
+                camEventSource.close();
+            }
+            if (hls) {
+                hls.destroy();
+            }
+        };
+    </script>
+</body>
+</html>
+

@@ -25,6 +25,8 @@ import it.PioSoft.PioBase.services.WakeOnLanService;
 import it.PioSoft.PioBase.services.PinEntryService;
 import it.PioSoft.PioBase.services.SystemInfoService;
 import it.PioSoft.PioBase.services.DeviceMonitoringService;
+import it.PioSoft.PioBase.services.IpCamScannerService;
+import it.PioSoft.PioBase.services.PcPingMonitorService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -58,6 +60,12 @@ public class PersonalPcController {
 
     @Autowired
     private DeviceMonitoringService deviceMonitoringService;
+
+    @Autowired
+    private IpCamScannerService ipCamScannerService;
+
+    @Autowired
+    private PcPingMonitorService pcPingMonitorService;
 
     @PostMapping("/wol")
     public ResponseEntity<String> wakeOnLan(@RequestBody WolRequest request) {
@@ -244,5 +252,92 @@ public class PersonalPcController {
     public SseEmitter monitorDevice(@PathVariable String ip) {
         System.out.println("Client connesso per monitoraggio dispositivo: " + ip);
         return deviceMonitoringService.subscribeToDevice(ip);
+    }
+
+    /**
+     * Endpoint unificato per monitoraggio combinato PC + IP Camera
+     * Invia aggiornamenti SSE con entrambi gli stati in un unico evento
+     * GET /api/monitor/system/{pcIp}
+     */
+    @GetMapping(value = "/monitor/system/{pcIp}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter monitorSystem(@PathVariable String pcIp) {
+        System.out.println("Client connesso per monitoraggio combinato PC+Cam - PC IP: " + pcIp);
+        return deviceMonitoringService.subscribeToSystemStatus(pcIp);
+    }
+
+    /**
+     * Endpoint per monitorare la IP cam tramite SSE
+     * Il client si sottoscrive e riceve aggiornamenti automatici sullo stato della cam
+     */
+    @GetMapping(value = "/ipcam/monitor", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter monitorIpCam() {
+        String camIp = ipCamScannerService.getCurrentCamIp();
+        if (camIp != null) {
+            System.out.println("Client connesso per monitoraggio IP cam: " + camIp);
+            return deviceMonitoringService.subscribeToDevice(camIp);
+        } else {
+            System.out.println("Nessuna IP cam configurata, creazione emitter vuoto");
+            SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
+            try {
+                emitter.send(SseEmitter.event().name("status").data(Map.of(
+                    "online", false,
+                    "message", "IP cam non ancora trovata, scansione in corso..."
+                )));
+            } catch (Exception e) {
+                emitter.completeWithError(e);
+            }
+            return emitter;
+        }
+    }
+
+    /**
+     * Endpoint per ottenere l'IP corrente della cam
+     */
+    @GetMapping("/ipcam/ip")
+    public ResponseEntity<Map<String, Object>> getIpCamIp() {
+        String camIp = ipCamScannerService.getCurrentCamIp();
+        if (camIp != null) {
+            return ResponseEntity.ok(Map.of(
+                "ip", camIp,
+                "rtspUrl", "rtsp://" + camIp + ":554/",
+                "message", "IP cam trovata"
+            ));
+        } else {
+            return ResponseEntity.ok(Map.of(
+                "ip", "",
+                "message", "IP cam non ancora trovata, scansione in corso..."
+            ));
+        }
+    }
+
+    /**
+     * Endpoint per forzare una nuova scansione della rete
+     */
+    @PostMapping("/ipcam/scan")
+    public ResponseEntity<String> forceCamScan() {
+        System.out.println("Scansione rete forzata per IP cam");
+        ipCamScannerService.forceScan();
+        return ResponseEntity.ok("Scansione rete avviata");
+    }
+
+    /**
+     * Endpoint per ricevere ping dal PC per monitoraggio stato attivo
+     * Il PC deve chiamare questo endpoint ogni 3 secondi per segnalare che è online
+     * POST /api/pc/ping/{pcIp}
+     */
+    @PostMapping("/pc/ping/{pcIp}")
+    public ResponseEntity<Map<String, Object>> receivePcPing(@PathVariable String pcIp) {
+        boolean statusChanged = pcPingMonitorService.receivePing(pcIp);
+
+        if (statusChanged) {
+            // Se lo stato è cambiato, forza aggiornamento SSE
+            deviceMonitoringService.forceCombinedStatusCheck(pcIp);
+        }
+
+        return ResponseEntity.ok(Map.of(
+            "status", "ok",
+            "timestamp", System.currentTimeMillis(),
+            "pcIp", pcIp
+        ));
     }
 }

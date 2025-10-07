@@ -59,7 +59,6 @@ public class RemoteShutdownService {
             channelExec.disconnect();
 
             // NOTIFICA IMMEDIATA: Marca il dispositivo come offline dopo comando spegnimento
-            System.out.println("Comando spegnimento inviato a " + ipAddress + " - Notificando stato offline");
             deviceMonitoringService.markDeviceOffline(ipAddress, "Spegnimento remoto eseguito");
 
         } finally {

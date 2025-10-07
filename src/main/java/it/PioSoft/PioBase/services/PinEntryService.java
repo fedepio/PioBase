@@ -70,14 +70,12 @@ public class PinEntryService {
 
         while (attempts < maxAttempts) {
             if (pcStatusService.isPcOnline(ipAddress)) {
-                System.out.println("PC " + ipAddress + " è online dopo " + (attempts * 5) + " secondi");
                 return true;
             }
 
             try {
                 Thread.sleep(5000); // attende 5 secondi
                 attempts++;
-                System.out.println("Attendo che " + ipAddress + " sia online... tentativo " + attempts + "/" + maxAttempts);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return false;
