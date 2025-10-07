@@ -26,6 +26,7 @@ import it.PioSoft.PioBase.services.PinEntryService;
 import it.PioSoft.PioBase.services.SystemInfoService;
 import it.PioSoft.PioBase.services.DeviceMonitoringService;
 import it.PioSoft.PioBase.services.IpCamScannerService;
+import it.PioSoft.PioBase.services.PcPingMonitorService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -62,6 +63,9 @@ public class PersonalPcController {
 
     @Autowired
     private IpCamScannerService ipCamScannerService;
+
+    @Autowired
+    private PcPingMonitorService pcPingMonitorService;
 
     @PostMapping("/wol")
     public ResponseEntity<String> wakeOnLan(@RequestBody WolRequest request) {
@@ -314,5 +318,26 @@ public class PersonalPcController {
         System.out.println("Scansione rete forzata per IP cam");
         ipCamScannerService.forceScan();
         return ResponseEntity.ok("Scansione rete avviata");
+    }
+
+    /**
+     * Endpoint per ricevere ping dal PC per monitoraggio stato attivo
+     * Il PC deve chiamare questo endpoint ogni 3 secondi per segnalare che è online
+     * POST /api/pc/ping/{pcIp}
+     */
+    @PostMapping("/pc/ping/{pcIp}")
+    public ResponseEntity<Map<String, Object>> receivePcPing(@PathVariable String pcIp) {
+        boolean statusChanged = pcPingMonitorService.receivePing(pcIp);
+
+        if (statusChanged) {
+            // Se lo stato è cambiato, forza aggiornamento SSE
+            deviceMonitoringService.forceCombinedStatusCheck(pcIp);
+        }
+
+        return ResponseEntity.ok(Map.of(
+            "status", "ok",
+            "timestamp", System.currentTimeMillis(),
+            "pcIp", pcIp
+        ));
     }
 }

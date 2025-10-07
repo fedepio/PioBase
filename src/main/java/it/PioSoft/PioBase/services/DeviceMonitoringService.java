@@ -22,13 +22,15 @@ public class DeviceMonitoringService {
 
     private final PcStatusService pcStatusService;
     private final SystemInfoService systemInfoService;
+    private final PcPingMonitorService pcPingMonitorService;
 
     // Riferimento all'IpCamScannerService (sarà iniettato)
     private IpCamScannerService ipCamScannerService;
 
-    public DeviceMonitoringService(PcStatusService pcStatusService, SystemInfoService systemInfoService) {
+    public DeviceMonitoringService(PcStatusService pcStatusService, SystemInfoService systemInfoService, PcPingMonitorService pcPingMonitorService) {
         this.pcStatusService = pcStatusService;
         this.systemInfoService = systemInfoService;
+        this.pcPingMonitorService = pcPingMonitorService;
     }
 
     // Setter per dependency injection circolare
@@ -97,6 +99,9 @@ public class DeviceMonitoringService {
     public void markDeviceOffline(String ipAddress, String reason) {
         System.out.println("Marcando dispositivo come offline: " + ipAddress + " - Motivo: " + reason);
 
+        // Usa il ping monitor per marcare il PC come offline
+        pcPingMonitorService.markAsOffline(ipAddress);
+
         Map<String, Object> status = new HashMap<>();
         status.put("ip", ipAddress);
         status.put("timestamp", System.currentTimeMillis());
@@ -107,21 +112,8 @@ public class DeviceMonitoringService {
         deviceStatusCache.put(ipAddress, status);
         broadcastToDevice(ipAddress, status);
 
-        // Programma controlli multipli per confermare lo stato offline
-        new Thread(() -> {
-            try {
-                // Primo controllo dopo 1 secondo
-                Thread.sleep(1000);
-                forceStatusCheckUltraFast(ipAddress);
-
-                // Secondo controllo dopo 3 secondi per essere sicuri
-                Thread.sleep(2000);
-                forceStatusCheckUltraFast(ipAddress);
-
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }).start();
+        // Forza anche l'aggiornamento dello stato combinato
+        forceCombinedStatusCheck(ipAddress);
     }
 
     /**
@@ -326,16 +318,38 @@ public class DeviceMonitoringService {
         Map<String, Object> combined = new HashMap<>();
         combined.put("timestamp", System.currentTimeMillis());
 
-        // Stato del PC (con SSH)
-        Map<String, Object> pcStatus = getDeviceStatus(pcIpAddress);
-        combined.put("pcIp", pcIpAddress);
-        combined.put("pcOnline", pcStatus.getOrDefault("online", false));
-        combined.put("pcHostname", pcStatus.getOrDefault("hostname", "N/A"));
-        combined.put("pcOs", pcStatus.getOrDefault("os", "N/A"));
-        combined.put("pcUptime", pcStatus.getOrDefault("uptime", "N/A"));
+        // Usa il nuovo sistema di ping per verificare lo stato del PC
+        boolean pcOnline = pcPingMonitorService.isPcOnline(pcIpAddress);
 
-        if (pcStatus.containsKey("systemInfoError")) {
-            combined.put("pcError", pcStatus.get("systemInfoError"));
+        combined.put("pcIp", pcIpAddress);
+        combined.put("pcOnline", pcOnline);
+
+        // Se il PC è online, recupera le info di sistema
+        if (pcOnline) {
+            try {
+                Map<String, String> systemInfo = systemInfoService.getSystemInfoQuick(pcIpAddress);
+
+                if (systemInfo.containsKey("error")) {
+                    combined.put("pcHostname", "N/A");
+                    combined.put("pcOs", "N/A");
+                    combined.put("pcUptime", "N/A");
+                    combined.put("pcError", systemInfo.get("error"));
+                } else {
+                    combined.put("pcHostname", systemInfo.getOrDefault("hostname", "N/A"));
+                    combined.put("pcOs", systemInfo.getOrDefault("os", "N/A"));
+                    combined.put("pcUptime", systemInfo.getOrDefault("uptime", "N/A"));
+                }
+            } catch (Exception e) {
+                combined.put("pcHostname", "N/A");
+                combined.put("pcOs", "N/A");
+                combined.put("pcUptime", "N/A");
+                combined.put("pcError", "Errore recupero info: " + e.getMessage());
+            }
+        } else {
+            combined.put("pcHostname", "N/A");
+            combined.put("pcOs", "N/A");
+            combined.put("pcUptime", "N/A");
+            combined.put("pcError", "PC offline - nessun ping ricevuto");
         }
 
         // Stato della IP Cam (solo ping, NO SSH)
