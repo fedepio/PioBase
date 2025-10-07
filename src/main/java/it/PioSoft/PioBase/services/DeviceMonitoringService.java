@@ -5,6 +5,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -250,28 +253,21 @@ public class DeviceMonitoringService {
         SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
         combinedEmitters.add(emitter);
 
+        // Registra il PC per il monitoraggio attivo tramite ping
+        pcPingMonitorService.registerPcForMonitoring(pcIpAddress);
+
         emitter.onCompletion(() -> combinedEmitters.remove(emitter));
         emitter.onTimeout(() -> combinedEmitters.remove(emitter));
         emitter.onError(e -> combinedEmitters.remove(emitter));
 
-        // Invia stato corrente se disponibile
-        if (!lastCombinedStatus.isEmpty()) {
-            try {
-                emitter.send(SseEmitter.event().name("systemStatus").data(lastCombinedStatus));
-            } catch (IOException e) {
-                combinedEmitters.remove(emitter);
-            }
-        } else {
-            // Invia stato iniziale immediato
-            try {
-                Map<String, Object> initialStatus = buildCombinedStatus(pcIpAddress);
-                emitter.send(SseEmitter.event().name("systemStatus").data(initialStatus));
-            } catch (IOException e) {
-                combinedEmitters.remove(emitter);
-            }
+        // Invia stato iniziale immediato
+        try {
+            Map<String, Object> initialStatus = buildCombinedStatus(pcIpAddress);
+            emitter.send(SseEmitter.event().name("systemStatus").data(initialStatus));
+        } catch (IOException e) {
+            combinedEmitters.remove(emitter);
         }
 
-        System.out.println("Client sottoscritto a monitoraggio combinato PC+Cam. Clients attivi: " + combinedEmitters.size());
         return emitter;
     }
 
@@ -381,8 +377,8 @@ public class DeviceMonitoringService {
         status.put("timestamp", System.currentTimeMillis());
 
         try {
-            // Solo ping veloce, NO SSH per le camere
-            boolean isOnline = pcStatusService.isPcOnlineFast(ipAddress);
+            // Ping diretto alla camera - verifica porta RTSP 554
+            boolean isOnline = checkCameraOnline(ipAddress);
             status.put("online", isOnline);
 
             if (!isOnline) {
@@ -394,6 +390,31 @@ public class DeviceMonitoringService {
         }
 
         return status;
+    }
+
+    /**
+     * Verifica se una camera è online controllando la porta RTSP
+     */
+    private boolean checkCameraOnline(String ipAddress) {
+        try {
+            // Metodo 1: Prova ping ICMP
+            InetAddress inet = InetAddress.getByName(ipAddress);
+            if (inet.isReachable(1000)) {
+                return true;
+            }
+
+            // Metodo 2: Verifica porta RTSP 554
+            try (Socket socket = new Socket()) {
+                socket.connect(new InetSocketAddress(ipAddress, 554), 1000);
+                return true;
+            } catch (IOException e) {
+                // Porta non disponibile
+            }
+
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /**

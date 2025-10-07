@@ -25,12 +25,14 @@ public class IpCamScannerService {
     private static final int MAX_THREADS = 50;
     private static final String CAM_CONFIG_DIR = "config";
     private static final String CAM_CONFIG_FILE = "ipcam.json";
+    private static final long RESCAN_INTERVAL_MS = 20 * 60 * 1000; // 20 minuti in millisecondi
 
     private final DeviceMonitoringService monitoringService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private String currentCamIp = null;
     private boolean isScanning = false;
+    private long lastScanTime = 0; // Timestamp dell'ultima scansione
 
     public IpCamScannerService(DeviceMonitoringService monitoringService) {
         this.monitoringService = monitoringService;
@@ -152,19 +154,28 @@ public class IpCamScannerService {
     }
 
     /**
-     * Verifica periodicamente lo stato della cam
+     * Verifica periodicamente lo stato della cam (ogni 3 secondi)
+     * Esegue scansione completa della rete solo se offline E sono passati almeno 20 minuti
      */
     @Scheduled(fixedDelay = 3000)
     public void checkCamStatus() {
         if (currentCamIp == null) {
-            // Se non abbiamo un IP, prova a scansionare
+            // Se non abbiamo un IP, prova a scansionare (solo se non stiamo già scansionando)
             if (!isScanning) {
-                scanAndSaveCamIp();
+                long timeSinceLastScan = System.currentTimeMillis() - lastScanTime;
+                if (timeSinceLastScan >= RESCAN_INTERVAL_MS || lastScanTime == 0) {
+                    logger.info("Nessuna cam configurata, avvio scansione iniziale");
+                    lastScanTime = System.currentTimeMillis();
+                    scanAndSaveCamIp();
+                } else {
+                    long minutesRemaining = (RESCAN_INTERVAL_MS - timeSinceLastScan) / 60000;
+                    logger.debug("Cam non trovata, prossima scansione tra {} minuti", minutesRemaining);
+                }
             }
             return;
         }
 
-        // Verifica se la cam è online
+        // Verifica se la cam è online (ping veloce - operazione leggera)
         boolean isOnline = isCamOnline(currentCamIp);
 
         // Prepara lo stato da broadcast
@@ -177,15 +188,29 @@ public class IpCamScannerService {
 
         if (isOnline) {
             status.put("rtspUrl", "rtsp://" + currentCamIp + ":" + RTSP_PORT + "/");
+            // Reset del timestamp se torna online
+            if (lastScanTime != 0) {
+                logger.debug("Cam {} è online", currentCamIp);
+            }
         }
 
         // Usa il broadcast del DeviceMonitoringService
         broadcastCamStatus(currentCamIp, status);
 
-        // Se offline, ri-scansiona la rete
-        if (!isOnline) {
-            logger.warn("Cam {} è offline, avvio ri-scansione rete", currentCamIp);
-            scanAndSaveCamIp();
+        // Se offline, ri-scansiona la rete SOLO se sono passati almeno 20 minuti
+        if (!isOnline && !isScanning) {
+            long timeSinceLastScan = System.currentTimeMillis() - lastScanTime;
+
+            if (timeSinceLastScan >= RESCAN_INTERVAL_MS || lastScanTime == 0) {
+                logger.warn("Cam {} è offline da tempo, avvio ri-scansione rete (ultima scansione {} minuti fa)",
+                    currentCamIp, timeSinceLastScan / 60000);
+                lastScanTime = System.currentTimeMillis();
+                scanAndSaveCamIp();
+            } else {
+                long minutesRemaining = (RESCAN_INTERVAL_MS - timeSinceLastScan) / 60000;
+                logger.debug("Cam {} è offline, ma prossima scansione tra {} minuti",
+                    currentCamIp, minutesRemaining);
+            }
         }
     }
 
@@ -223,6 +248,103 @@ public class IpCamScannerService {
 
         } catch (Exception e) {
             logger.error("Errore broadcast stato cam", e);
+        }
+    }
+
+    /**
+     * Ottiene tutti gli IP locali di questo host
+     */
+    private Set<String> getLocalIps() {
+        Set<String> localIps = new HashSet<>();
+        try {
+            // Aggiungi localhost
+            localIps.add("127.0.0.1");
+            localIps.add("192.168.1.37");
+            localIps.add(InetAddress.getLocalHost().getHostAddress());
+
+            // Aggiungi tutti gli IP delle interfacce
+            Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+            while (interfaces.hasMoreElements()) {
+                NetworkInterface iface = interfaces.nextElement();
+                Enumeration<InetAddress> addresses = iface.getInetAddresses();
+                while (addresses.hasMoreElements()) {
+                    InetAddress addr = addresses.nextElement();
+                    if (addr instanceof Inet4Address) {
+                        localIps.add(addr.getHostAddress());
+                    }
+                }
+            }
+            logger.debug("IP locali rilevati: {}", localIps);
+        } catch (Exception e) {
+            logger.error("Errore nel recuperare IP locali", e);
+        }
+        return localIps;
+    }
+
+    /**
+     * Verifica se un dispositivo è realmente una IP cam RTSP
+     */
+    private boolean isRealIpCam(String ip) {
+        try {
+            // 1. Verifica che NON sia il nostro IP locale
+            String localIp = InetAddress.getLocalHost().getHostAddress();
+            if (ip.equals(localIp)) {
+                logger.debug("Skip IP locale principale: {}", ip);
+                return false;
+            }
+
+            // 2. Verifica che NON sia un IP di questo host
+            Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+            while (interfaces.hasMoreElements()) {
+                NetworkInterface iface = interfaces.nextElement();
+                Enumeration<InetAddress> addresses = iface.getInetAddresses();
+                while (addresses.hasMoreElements()) {
+                    InetAddress addr = addresses.nextElement();
+                    if (ip.equals(addr.getHostAddress())) {
+                        logger.debug("Skip IP host (interfaccia {}): {}", iface.getName(), ip);
+                        return false;
+                    }
+                }
+            }
+
+            // 3. Prova a connettersi con RTSP OPTIONS per verificare che sia un server RTSP
+            try (Socket socket = new Socket()) {
+                socket.connect(new InetSocketAddress(ip, RTSP_PORT), TIMEOUT_MS);
+                socket.setSoTimeout(TIMEOUT_MS * 2);
+
+                // Invia comando RTSP OPTIONS
+                String rtspRequest = "OPTIONS rtsp://" + ip + ":554/ RTSP/1.0\r\n" +
+                                   "CSeq: 1\r\n" +
+                                   "User-Agent: Java RTSP Scanner\r\n" +
+                                   "\r\n";
+
+                socket.getOutputStream().write(rtspRequest.getBytes());
+                socket.getOutputStream().flush();
+
+                // Leggi risposta
+                byte[] buffer = new byte[1024];
+                int bytesRead = socket.getInputStream().read(buffer);
+
+                if (bytesRead > 0) {
+                    String response = new String(buffer, 0, bytesRead);
+                    // Verifica che sia una risposta RTSP valida
+                    if (response.contains("RTSP/1.0") &&
+                        (response.contains("200 OK") ||
+                         response.contains("Public:") ||
+                         response.contains("OPTIONS"))) {
+                        logger.info("Server RTSP valido confermato: {}", ip);
+                        return true;
+                    } else {
+                        logger.debug("Porta 554 aperta ma risposta non RTSP valida: {}", ip);
+                    }
+                }
+            }
+
+            return false;
+
+        } catch (Exception e) {
+            logger.debug("Errore verifica RTSP per {}: {}", ip, e.getMessage());
+            return false;
         }
     }
 
@@ -285,13 +407,29 @@ public class IpCamScannerService {
         ExecutorService executor = Executors.newFixedThreadPool(MAX_THREADS);
         List<Future<?>> futures = new ArrayList<>();
 
+        // Ottieni tutti gli IP locali da escludere
+        Set<String> localIps = getLocalIps();
+        logger.info("IP locali da escludere dalla scansione: {}", localIps);
+
         for (int i = 1; i <= 254; i++) {
             final String ip = networkPrefix + i;
 
+            // Skip IP locali
+            if (localIps.contains(ip)) {
+                logger.debug("Skip IP locale nella scansione: {}", ip);
+                continue;
+            }
+
             Future<?> future = executor.submit(() -> {
+                // Prima verifica porta aperta (veloce)
                 if (checkPort(ip, RTSP_PORT)) {
-                    logger.info("Dispositivo RTSP trovato: {}", ip);
-                    foundDevices.add(ip);
+                    logger.debug("Porta 554 aperta su: {}", ip);
+
+                    // Poi verifica che sia realmente una IP cam
+                    if (isRealIpCam(ip)) {
+                        logger.info("IP Cam RTSP confermata: {}", ip);
+                        foundDevices.add(ip);
+                    }
                 }
             });
 
@@ -300,7 +438,7 @@ public class IpCamScannerService {
 
         for (Future<?> future : futures) {
             try {
-                future.get(TIMEOUT_MS * 2, TimeUnit.MILLISECONDS);
+                future.get(TIMEOUT_MS * 4, TimeUnit.MILLISECONDS);
             } catch (TimeoutException e) {
                 future.cancel(true);
             } catch (Exception e) {
@@ -318,7 +456,7 @@ public class IpCamScannerService {
             Thread.currentThread().interrupt();
         }
 
-        logger.info("Scansione completata. Trovati {} dispositivi", foundDevices.size());
+        logger.info("Scansione completata. Trovate {} IP cam RTSP", foundDevices.size());
         return new ArrayList<>(foundDevices);
     }
 
