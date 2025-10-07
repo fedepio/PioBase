@@ -12,6 +12,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.servlet.http.HttpServletRequest;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashMap;
@@ -66,23 +67,34 @@ public class StreamController {
      * GET /api/stream/start-auto
      */
     @GetMapping("/start-auto")
-    public ResponseEntity<Map<String, Object>> startStreamAuto() {
+    public ResponseEntity<Map<String, Object>> startStreamAuto(HttpServletRequest request) {
         logger.info("Richiesta avvio stream automatico dalla IP cam");
+
+        // Ottieni l'IP del server dalla richiesta
+        String serverHost = request.getServerName();
+        int serverPort = request.getServerPort();
+        String baseUrl = "http://" + serverHost + ":" + serverPort;
+
+        // MediaMTX usa porte fisse
+        String mediaMtxHlsUrl = "http://" + serverHost + ":8890/cam/index.m3u8";
+        String mediaMtxWhepUrl = "http://" + serverHost + ":8889/cam/whep";
 
         // Usa MediaMTX invece di FFmpeg per streaming più efficiente
         Map<String, Object> result = webRtcStreamService.startWebRtcServer();
 
         if ((Boolean) result.get("success")) {
-            // Aggiungi informazioni aggiuntive per il client
+            // Aggiungi informazioni aggiuntive per il client con URL corretti
             result.put("streamType", "MediaMTX");
             result.put("webrtcEnabled", true);
             result.put("hlsEnabled", true);
-            result.put("hlsUrl", "http://localhost:8890/cam/index.m3u8");
-            result.put("testPage", "http://localhost:8080/api/stream/player");
+            result.put("hlsUrl", mediaMtxHlsUrl);
+            result.put("webrtcWhepUrl", mediaMtxWhepUrl);
+            result.put("testPage", baseUrl + "/api/stream/player");
             result.put("latencyWebRTC", "~100-200ms");
             result.put("latencyHLS", "~2-6s");
+            result.put("serverHost", serverHost);
 
-            logger.info("Stream MediaMTX avviato con successo");
+            logger.info("Stream MediaMTX avviato con successo - HLS: {}, WebRTC: {}", mediaMtxHlsUrl, mediaMtxWhepUrl);
             return ResponseEntity.ok(result);
         } else {
             return ResponseEntity.status(500).body(result);
@@ -116,8 +128,12 @@ public class StreamController {
      * GET /api/stream/best-hls-url
      */
     @GetMapping("/best-hls-url")
-    public ResponseEntity<Map<String, Object>> getBestHlsUrl() {
+    public ResponseEntity<Map<String, Object>> getBestHlsUrl(HttpServletRequest request) {
         Map<String, Object> result = new HashMap<>();
+
+        // Ottieni l'IP del server dalla richiesta
+        String serverHost = request.getServerName();
+        int serverPort = request.getServerPort();
 
         // Verifica MediaMTX (priorità)
         Map<String, Object> webrtcStatus = webRtcStreamService.getStatus();
@@ -126,11 +142,12 @@ public class StreamController {
         if (isMediaMtxRunning) {
             result.put("available", true);
             result.put("provider", "MediaMTX");
-            result.put("hlsUrl", "http://localhost:8890/cam/index.m3u8");
+            result.put("hlsUrl", "http://" + serverHost + ":8890/cam/index.m3u8");
+            result.put("webrtcWhepUrl", "http://" + serverHost + ":8889/cam/whep");
             result.put("latency", "2-6 seconds");
             result.put("recommended", true);
             result.put("note", "HLS nativo MediaMTX - ottimale per latenza e performance");
-            logger.debug("Best HLS URL: MediaMTX nativo");
+            logger.debug("Best HLS URL: MediaMTX nativo - {}", result.get("hlsUrl"));
             return ResponseEntity.ok(result);
         }
 
@@ -141,11 +158,11 @@ public class StreamController {
         if (isFfmpegStreaming) {
             result.put("available", true);
             result.put("provider", "FFmpeg");
-            result.put("hlsUrl", "http://localhost:8080/api/stream/hls/stream.m3u8");
+            result.put("hlsUrl", "http://" + serverHost + ":" + serverPort + "/api/stream/hls/stream.m3u8");
             result.put("latency", "4-10 seconds");
             result.put("recommended", false);
             result.put("note", "HLS FFmpeg attivo. Per migliori performance, considera MediaMTX");
-            logger.debug("Best HLS URL: FFmpeg");
+            logger.debug("Best HLS URL: FFmpeg - {}", result.get("hlsUrl"));
             return ResponseEntity.ok(result);
         }
 
