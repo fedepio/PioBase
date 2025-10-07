@@ -188,10 +188,6 @@ public class IpCamScannerService {
 
         if (isOnline) {
             status.put("rtspUrl", "rtsp://" + currentCamIp + ":" + RTSP_PORT + "/");
-            // Reset del timestamp se torna online
-            if (lastScanTime != 0) {
-                logger.debug("Cam {} è online", currentCamIp);
-            }
         }
 
         // Usa il broadcast del DeviceMonitoringService
