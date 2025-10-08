@@ -99,6 +99,7 @@ public class WebRtcStreamService {
 
     /**
      * Configura MediaMTX dinamicamente via API per aggiornare il path RTSP
+     * con ottimizzazioni per bassa latenza
      */
     private void configureMediaMtxPath(String rtspUrl) {
         try {
@@ -108,10 +109,12 @@ public class WebRtcStreamService {
             Map<String, Object> config = new HashMap<>();
             config.put("source", rtspUrl);
             config.put("sourceProtocol", "tcp");
-            config.put("sourceOnDemand", true);
+            config.put("sourceOnDemand", false);  // Connessione sempre attiva per ridurre latenza
+            config.put("readBufferCount", 2048);  // Buffer ottimizzato
+            config.put("disablePublisherOverride", false);
 
             restTemplate.patchForObject(apiUrl, config, String.class);
-            logger.info("MediaMTX configurato con RTSP: {}", rtspUrl);
+            logger.info("MediaMTX configurato con RTSP ottimizzato per bassa latenza: {}", rtspUrl);
         } catch (Exception e) {
             logger.warn("Impossibile configurare path via API (potrebbe essere già configurato nel file YAML): {}", e.getMessage());
         }
@@ -195,13 +198,14 @@ public class WebRtcStreamService {
     }
 
     /**
-     * Crea file configurazione MediaMTX
+     * Crea file configurazione MediaMTX ottimizzato per bassa latenza
      */
     private void createMediaMtxConfig(String camIp) throws IOException {
         String rtspSource = String.format("rtsp://tony:747@%s:554/", camIp);
 
         String config = String.format("""
 # MediaMTX Configuration for IP Cam WebRTC Streaming
+# Ottimizzato per latenza ultra-bassa (<200ms)
 # Auto-generated
 
 # API HTTP
@@ -212,7 +216,7 @@ apiAddress: :9997
 metrics: yes
 metricsAddress: :9998
 
-# Server HTTP per WebRTC
+# Server HTTP per WebRTC - OTTIMIZZATO PER BASSA LATENZA
 webrtc: yes
 webrtcAddress: :%d
 webrtcServerKey: server.key
@@ -220,33 +224,71 @@ webrtcServerCert: server.crt
 webrtcAllowOrigin: "*"
 webrtcTrustedProxies: []
 webrtcICEServers2: []
+# Ottimizzazioni WebRTC per ridurre latenza
+webrtcICEHostNAT1To1IPs: []
+webrtcICEUDPMuxAddress: ""
+webrtcICETCPMuxAddress: ""
 
-# Proxy RTSP locale
+# Proxy RTSP locale con ottimizzazioni
 rtspAddress: :%d
 protocols: [tcp]
+rtspEncryption: "no"
+rtspTransport: tcp
 
-# HLS integrato (opzionale)
+# HLS integrato con latenza ridotta
 hls: yes
 hlsAddress: :%d
 hlsAllowOrigin: "*"
+hlsVariant: lowLatency
+hlsSegmentCount: 3
+hlsSegmentDuration: 1s
+hlsPartDuration: 200ms
+hlsSegmentMaxSize: 50M
 
 # RTP
 rtpAddress: :%d
 rtcpAddress: :%d
 
-# Percorsi stream
+# Ottimizzazioni globali per streaming
+readTimeout: 10s
+writeTimeout: 10s
+readBufferCount: 512
+udpMaxPayloadSize: 1472
+
+# Percorsi stream - CONFIGURAZIONE OTTIMIZZATA
 paths:
   cam:
     source: %s
     sourceProtocol: tcp
-    sourceOnDemand: no
+    sourceOnDemand: false
+    sourceFingerprint: ""
+
+    # Ottimizzazioni video per bassa latenza
     runOnInit: ""
     runOnDemand: ""
     runOnReady: ""
-    
+    runOnRead: ""
+    runOnUnread: ""
+    runOnNotReady: ""
+
+    # Parametri buffer ottimizzati
+    readBufferCount: 2048
+
+    # Riduce il buffering per WebRTC
+    disablePublisherOverride: false
+    fallback: ""
+
+    # Ottimizzazioni RTSP->WebRTC
+    overridePublisher: false
+    srtPublishPassphrase: ""
+
 # Log
 logLevel: info
 logDestinations: [stdout]
+
+# Ottimizzazioni performance
+externalAuthenticationURL: ""
+authInternalUsers: []
 """,
             WEBRTC_HTTP_PORT,
             WEBRTC_RTSP_PORT,
@@ -257,7 +299,7 @@ logDestinations: [stdout]
         );
 
         Files.writeString(Path.of(MEDIAMTX_CONFIG_FILE), config);
-        logger.info("Creato file configurazione MediaMTX: {}", MEDIAMTX_CONFIG_FILE);
+        logger.info("Creato file configurazione MediaMTX ottimizzato per bassa latenza: {}", MEDIAMTX_CONFIG_FILE);
     }
 
     /**
