@@ -3,6 +3,7 @@ package it.PioSoft.PioBase.services;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -54,7 +55,7 @@ public class WebRtcStreamService {
     /**
      * Avvia server MediaMTX per WebRTC streaming
      */
-    public synchronized Map<String, Object> startWebRtcServer() {
+    public synchronized Map<String, Object> startWebRtcServer(String rtspUrl) {
         Map<String, Object> result = new HashMap<>();
 
         if (isRunning) {
@@ -63,105 +64,54 @@ public class WebRtcStreamService {
             return result;
         }
 
-        // Ottieni IP cam
-        String camIp = ipCamScannerService.getCurrentCamIp();
-        if (camIp == null || camIp.isEmpty()) {
+        // Usa l'URL RTSP passato come parametro
+        if (rtspUrl == null || rtspUrl.isEmpty()) {
             result.put("success", false);
-            result.put("message", "IP cam non disponibile");
-            result.put("suggestion", "Attendere che la scansione rete trovi la cam");
+            result.put("message", "URL RTSP non valido");
             return result;
         }
 
-        currentCamIp = camIp;
+        // Verifica se MediaMTX è già in esecuzione (servizio esterno)
+        if (isMediaMtxAlreadyRunning()) {
+            logger.info("MediaMTX esterno già in esecuzione, configuro il path dinamicamente");
+            usingExternalMediaMtx = true;
 
-        try {
-            // Crea configurazione MediaMTX
-            createMediaMtxConfig(camIp);
+            // Configura MediaMTX via API con l'URL RTSP dinamico
+            configureMediaMtxPath(rtspUrl);
 
-            // Verifica se MediaMTX è già in esecuzione
-            if (isMediaMtxAlreadyRunning()) {
-                logger.info("MediaMTX già in esecuzione su porta {}, utilizzo istanza esistente", WEBRTC_RTSP_PORT);
-                usingExternalMediaMtx = true;
-                isRunning = true;
-
-                result.put("success", true);
-                result.put("message", "Utilizzo istanza MediaMTX esistente");
-                result.put("webrtcUrl", "http://localhost:" + WEBRTC_HTTP_PORT + "/cam/");
-                result.put("whepUrl", "http://localhost:" + WEBRTC_HTTP_PORT + "/cam/whep");
-                result.put("rtspProxy", "rtsp://localhost:" + WEBRTC_RTSP_PORT + "/cam");
-                result.put("camIp", camIp);
-                result.put("latency", "~100-200ms");
-                result.put("externalMediaMtx", true);
-
-                return result;
-            }
-
-            // Verifica se MediaMTX è disponibile
-            if (!isMediaMtxAvailable()) {
-                result.put("success", false);
-                result.put("message", "MediaMTX non installato");
-                result.put("suggestion", "Scaricare MediaMTX da: https://github.com/bluenviron/mediamtx/releases");
-                result.put("installGuide", "Estrarre mediamtx.exe nella directory del progetto o nel PATH");
-                return result;
-            }
-
-            // Avvia MediaMTX
-            ProcessBuilder pb = new ProcessBuilder("mediamtx", MEDIAMTX_CONFIG_FILE);
-            pb.redirectErrorStream(true);
-            mediaMtxProcess = pb.start();
-            usingExternalMediaMtx = false;
-
-            // Thread per loggare output
-            new Thread(() -> {
-                try (BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(mediaMtxProcess.getInputStream()))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        logger.debug("MediaMTX: {}", line);
-                    }
-                } catch (IOException e) {
-                    logger.error("Errore lettura output MediaMTX", e);
-                }
-            }).start();
-
-            // Attendi avvio server
-            Thread.sleep(2000);
-
-            if (mediaMtxProcess.isAlive()) {
-                isRunning = true;
-
-                result.put("success", true);
-                result.put("message", "Server WebRTC avviato con successo");
-                result.put("webrtcUrl", "http://localhost:" + WEBRTC_HTTP_PORT + "/cam/");
-                result.put("whepUrl", "http://localhost:" + WEBRTC_HTTP_PORT + "/cam/whep");
-                result.put("rtspProxy", "rtsp://localhost:" + WEBRTC_RTSP_PORT + "/cam");
-                result.put("camIp", camIp);
-                result.put("latency", "~100-200ms");
-                result.put("externalMediaMtx", false);
-
-                logger.info("Server WebRTC avviato su porta {}", WEBRTC_HTTP_PORT);
-                logger.info("Streaming da cam: {}", camIp);
-            } else {
-                result.put("success", false);
-                result.put("message", "MediaMTX terminato inaspettatamente");
-            }
-
-        } catch (IOException e) {
-            logger.error("Errore I/O durante avvio MediaMTX", e);
-            result.put("success", false);
-            result.put("message", "Errore I/O: " + e.getMessage());
-        } catch (InterruptedException e) {
-            logger.error("Thread interrotto durante avvio MediaMTX", e);
-            Thread.currentThread().interrupt();
-            result.put("success", false);
-            result.put("message", "Operazione interrotta");
-        } catch (Exception e) {
-            logger.error("Errore generico durante avvio MediaMTX", e);
-            result.put("success", false);
-            result.put("message", "Errore: " + e.getMessage());
+            isRunning = true;
+            result.put("success", true);
+            result.put("message", "Server WebRTC configurato con successo (MediaMTX esterno)");
+            result.put("rtspUrl", rtspUrl);
+            return result;
         }
 
+        // Se MediaMTX non è in esecuzione, restituisci errore
+        // (assumendo che il servizio systemd lo gestisca)
+        result.put("success", false);
+        result.put("message", "MediaMTX non in esecuzione. Verificare che il servizio systemd sia attivo.");
+        result.put("suggestion", "sudo systemctl status mediamtx");
         return result;
+    }
+
+    /**
+     * Configura MediaMTX dinamicamente via API per aggiornare il path RTSP
+     */
+    private void configureMediaMtxPath(String rtspUrl) {
+        try {
+            RestTemplate restTemplate = new RestTemplate();
+            String apiUrl = "http://localhost:9997/v3/config/paths/patch/cam";
+
+            Map<String, Object> config = new HashMap<>();
+            config.put("source", rtspUrl);
+            config.put("sourceProtocol", "tcp");
+            config.put("sourceOnDemand", true);
+
+            restTemplate.patchForObject(apiUrl, config, String.class);
+            logger.info("MediaMTX configurato con RTSP: {}", rtspUrl);
+        } catch (Exception e) {
+            logger.warn("Impossibile configurare path via API (potrebbe essere già configurato nel file YAML): {}", e.getMessage());
+        }
     }
 
     /**

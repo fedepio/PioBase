@@ -2,6 +2,7 @@ package it.PioSoft.PioBase.controller;
 
 import it.PioSoft.PioBase.services.HlsStreamService;
 import it.PioSoft.PioBase.services.WebRtcStreamService;
+import it.PioSoft.PioBase.services.IpCamScannerService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,6 +36,9 @@ public class StreamController {
 
     @Autowired
     private WebRtcStreamService webRtcStreamService;
+
+    @Autowired
+    private IpCamScannerService ipCamScannerService;
 
     /**
      * Avvia lo streaming HLS da URL RTSP fornito
@@ -75,15 +79,27 @@ public class StreamController {
         int serverPort = request.getServerPort();
         String baseUrl = "http://" + serverHost + ":" + serverPort;
 
+        // Recupera IP cam dal servizio scanner
+        String camIp = ipCamScannerService.getCurrentCamIp();
+        if (camIp == null || camIp.isEmpty()) {
+            return ResponseEntity.status(404).body(Map.of(
+                "success", false,
+                "message", "IP cam non trovata nella configurazione"
+            ));
+        }
+
+        // Costruisci URL RTSP dalla configurazione
+        String rtspUrl = String.format("rtsp://%s:554/live/ch0", camIp);
+        logger.info("Usando RTSP URL dalla configurazione: {}", rtspUrl);
+
         // MediaMTX usa porte fisse
         String mediaMtxHlsUrl = "http://" + serverHost + ":8890/cam/index.m3u8";
         String mediaMtxWhepUrl = "http://" + serverHost + ":8889/cam/whep";
 
-        // Usa MediaMTX invece di FFmpeg per streaming più efficiente
-        Map<String, Object> result = webRtcStreamService.startWebRtcServer();
+        // Passa l'URL RTSP al service WebRTC
+        Map<String, Object> result = webRtcStreamService.startWebRtcServer(rtspUrl);
 
         if ((Boolean) result.get("success")) {
-            // Aggiungi informazioni aggiuntive per il client con URL corretti
             result.put("streamType", "MediaMTX");
             result.put("webrtcEnabled", true);
             result.put("hlsEnabled", true);
@@ -93,7 +109,8 @@ public class StreamController {
             result.put("latencyWebRTC", "~100-200ms");
             result.put("latencyHLS", "~2-6s");
             result.put("serverHost", serverHost);
-
+            result.put("rtspSource", rtspUrl);
+            result.put("cameraIp", camIp);
             logger.info("Stream MediaMTX avviato con successo - HLS: {}, WebRTC: {}", mediaMtxHlsUrl, mediaMtxWhepUrl);
             return ResponseEntity.ok(result);
         } else {

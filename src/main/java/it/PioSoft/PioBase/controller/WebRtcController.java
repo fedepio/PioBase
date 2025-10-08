@@ -1,6 +1,7 @@
 package it.PioSoft.PioBase.controller;
 
 import it.PioSoft.PioBase.services.WebRtcStreamService;
+import it.PioSoft.PioBase.services.IpCamScannerService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +21,9 @@ public class WebRtcController {
     @Autowired
     private WebRtcStreamService webRtcStreamService;
 
+    @Autowired
+    private IpCamScannerService ipCamScannerService;
+
     /**
      * Avvia server WebRTC
      * POST /api/webrtc/start
@@ -27,7 +31,21 @@ public class WebRtcController {
     @PostMapping("/start")
     public ResponseEntity<Map<String, Object>> startWebRtc() {
         logger.info("Richiesta avvio server WebRTC");
-        Map<String, Object> result = webRtcStreamService.startWebRtcServer();
+
+        // Recupera IP cam dal servizio scanner
+        String camIp = ipCamScannerService.getCurrentCamIp();
+        if (camIp == null || camIp.isEmpty()) {
+            return ResponseEntity.status(404).body(Map.of(
+                    "success", false,
+                    "message", "IP cam non trovata nella configurazione"
+            ));
+        }
+
+        // Costruisci URL RTSP dalla configurazione
+        String rtspUrl = String.format("rtsp://%s:554/live/ch0", camIp);
+        logger.info("Usando RTSP URL dalla configurazione: {}", rtspUrl);
+
+        Map<String, Object> result = webRtcStreamService.startWebRtcServer(rtspUrl);
 
         if ((Boolean) result.get("success")) {
             return ResponseEntity.ok(result);
@@ -67,4 +85,3 @@ public class WebRtcController {
         return ResponseEntity.ok(html);
     }
 }
-
