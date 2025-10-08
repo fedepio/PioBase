@@ -218,8 +218,6 @@ webrtcICEServers2: []
 
 # Proxy RTSP locale
 rtspAddress: :%d
-rtspServerKey: server.key
-rtspServerCert: server.crt
 protocols: [tcp]
 
 # HLS integrato (opzionale)
@@ -350,4 +348,3 @@ logDestinations: [stdout]
 """, WEBRTC_HTTP_PORT, WEBRTC_HTTP_PORT);
     }
 }
-
