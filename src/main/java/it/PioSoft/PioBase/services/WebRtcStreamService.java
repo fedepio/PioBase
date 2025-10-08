@@ -59,8 +59,11 @@ public class WebRtcStreamService {
         Map<String, Object> result = new HashMap<>();
 
         if (isRunning) {
-            result.put("success", false);
+            logger.info("Server WebRTC già attivo, restituisco configurazione corrente");
+            result.put("success", true);
             result.put("message", "Server WebRTC già attivo");
+            result.put("rtspUrl", rtspUrl);
+            result.put("alreadyRunning", true);
             return result;
         }
 
