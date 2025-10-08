@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -32,9 +33,22 @@ public class WebRtcStreamService {
     private boolean isRunning = false;
     private String currentCamIp;
     private final Map<String, Object> sessionInfo = new ConcurrentHashMap<>();
+    private boolean usingExternalMediaMtx = false;
 
     public WebRtcStreamService(IpCamScannerService ipCamScannerService) {
         this.ipCamScannerService = ipCamScannerService;
+    }
+
+    /**
+     * Verifica se MediaMTX è già in esecuzione sulla porta RTSP
+     */
+    private boolean isMediaMtxAlreadyRunning() {
+        try (Socket socket = new Socket()) {
+            socket.connect(new java.net.InetSocketAddress("localhost", WEBRTC_RTSP_PORT), 1000);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /**
@@ -64,6 +78,24 @@ public class WebRtcStreamService {
             // Crea configurazione MediaMTX
             createMediaMtxConfig(camIp);
 
+            // Verifica se MediaMTX è già in esecuzione
+            if (isMediaMtxAlreadyRunning()) {
+                logger.info("MediaMTX già in esecuzione su porta {}, utilizzo istanza esistente", WEBRTC_RTSP_PORT);
+                usingExternalMediaMtx = true;
+                isRunning = true;
+
+                result.put("success", true);
+                result.put("message", "Utilizzo istanza MediaMTX esistente");
+                result.put("webrtcUrl", "http://localhost:" + WEBRTC_HTTP_PORT + "/cam/");
+                result.put("whepUrl", "http://localhost:" + WEBRTC_HTTP_PORT + "/cam/whep");
+                result.put("rtspProxy", "rtsp://localhost:" + WEBRTC_RTSP_PORT + "/cam");
+                result.put("camIp", camIp);
+                result.put("latency", "~100-200ms");
+                result.put("externalMediaMtx", true);
+
+                return result;
+            }
+
             // Verifica se MediaMTX è disponibile
             if (!isMediaMtxAvailable()) {
                 result.put("success", false);
@@ -77,6 +109,7 @@ public class WebRtcStreamService {
             ProcessBuilder pb = new ProcessBuilder("mediamtx", MEDIAMTX_CONFIG_FILE);
             pb.redirectErrorStream(true);
             mediaMtxProcess = pb.start();
+            usingExternalMediaMtx = false;
 
             // Thread per loggare output
             new Thread(() -> {
@@ -104,6 +137,7 @@ public class WebRtcStreamService {
                 result.put("rtspProxy", "rtsp://localhost:" + WEBRTC_RTSP_PORT + "/cam");
                 result.put("camIp", camIp);
                 result.put("latency", "~100-200ms");
+                result.put("externalMediaMtx", false);
 
                 logger.info("Server WebRTC avviato su porta {}", WEBRTC_HTTP_PORT);
                 logger.info("Streaming da cam: {}", camIp);
@@ -139,6 +173,18 @@ public class WebRtcStreamService {
         if (!isRunning) {
             result.put("success", true);
             result.put("message", "Server WebRTC non attivo");
+            return result;
+        }
+
+        // Se stiamo usando MediaMTX esterno, non lo fermiamo
+        if (usingExternalMediaMtx) {
+            logger.info("MediaMTX esterno in uso, non lo fermo");
+            isRunning = false;
+            currentCamIp = null;
+            usingExternalMediaMtx = false;
+
+            result.put("success", true);
+            result.put("message", "Disconnesso da MediaMTX esterno (processo non fermato)");
             return result;
         }
 
@@ -178,9 +224,15 @@ public class WebRtcStreamService {
 
         status.put("isRunning", isRunning);
         status.put("camIp", currentCamIp);
+        status.put("usingExternalMediaMtx", usingExternalMediaMtx);
 
         if (isRunning && mediaMtxProcess != null) {
             status.put("processAlive", mediaMtxProcess.isAlive());
+            status.put("webrtcUrl", "http://localhost:" + WEBRTC_HTTP_PORT + "/cam/");
+            status.put("whepUrl", "http://localhost:" + WEBRTC_HTTP_PORT + "/cam/whep");
+            status.put("latency", "~100-200ms");
+        } else if (isRunning && usingExternalMediaMtx) {
+            status.put("processAlive", true);
             status.put("webrtcUrl", "http://localhost:" + WEBRTC_HTTP_PORT + "/cam/");
             status.put("whepUrl", "http://localhost:" + WEBRTC_HTTP_PORT + "/cam/whep");
             status.put("latency", "~100-200ms");
