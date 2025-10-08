@@ -21,6 +21,8 @@ public class DeviceMonitoringService {
 
     // Nuovi emitters per monitoraggio combinato PC + IP Cam
     private final List<SseEmitter> combinedEmitters = new CopyOnWriteArrayList<>();
+    // Mappa che associa ogni emitter al PC IP che sta monitorando
+    private final Map<SseEmitter, String> emitterToPcIpMap = new ConcurrentHashMap<>();
     private Map<String, Object> lastCombinedStatus = new HashMap<>();
 
     private final PcStatusService pcStatusService;
@@ -253,12 +255,26 @@ public class DeviceMonitoringService {
         SseEmitter emitter = new SseEmitter(Long.MAX_VALUE);
         combinedEmitters.add(emitter);
 
+        // Salva l'associazione tra emitter e PC IP
+        emitterToPcIpMap.put(emitter, pcIpAddress);
+
+        System.out.println("Client sottoscritto per PC IP: " + pcIpAddress + " (totale emitters: " + combinedEmitters.size() + ")");
+
         // Registra il PC per il monitoraggio attivo tramite ping
         pcPingMonitorService.registerPcForMonitoring(pcIpAddress);
 
-        emitter.onCompletion(() -> combinedEmitters.remove(emitter));
-        emitter.onTimeout(() -> combinedEmitters.remove(emitter));
-        emitter.onError(e -> combinedEmitters.remove(emitter));
+        emitter.onCompletion(() -> {
+            combinedEmitters.remove(emitter);
+            emitterToPcIpMap.remove(emitter);
+        });
+        emitter.onTimeout(() -> {
+            combinedEmitters.remove(emitter);
+            emitterToPcIpMap.remove(emitter);
+        });
+        emitter.onError(e -> {
+            combinedEmitters.remove(emitter);
+            emitterToPcIpMap.remove(emitter);
+        });
 
         // Invia stato iniziale immediato
         try {
@@ -280,21 +296,28 @@ public class DeviceMonitoringService {
             return; // Nessun client connesso, skip
         }
 
-        // Ottieni l'IP del PC dalla cache o usa default
-        String pcIp = getPcIpFromCache();
-        if (pcIp == null) {
-            return; // Nessun PC da monitorare
-        }
+        // Per ogni emitter, invia lo stato del PC corretto
+        combinedEmitters.removeIf(emitter -> {
+            String pcIp = emitterToPcIpMap.get(emitter);
+            if (pcIp == null) {
+                System.out.println("Emitter senza PC IP associato, rimuovo");
+                emitterToPcIpMap.remove(emitter);
+                return true; // Rimuovi emitter senza IP
+            }
 
-        Map<String, Object> combinedStatus = buildCombinedStatus(pcIp);
+            try {
+                Map<String, Object> combinedStatus = buildCombinedStatus(pcIp);
 
-        // Broadcast solo se ci sono cambiamenti
-        if (!combinedStatus.equals(lastCombinedStatus)) {
-            lastCombinedStatus = new HashMap<>(combinedStatus);
-            broadcastCombinedStatus(combinedStatus);
-            System.out.println("Stato combinato aggiornato - PC: " + combinedStatus.get("pcOnline") +
-                             ", Cam: " + combinedStatus.get("camOnline"));
-        }
+                // Invia sempre l'aggiornamento (il client può decidere se aggiornare la UI)
+                emitter.send(SseEmitter.event().name("systemStatus").data(combinedStatus));
+
+                return false; // Mantieni emitter
+            } catch (IOException e) {
+                System.out.println("Errore invio SSE per PC " + pcIp + ", rimuovo emitter");
+                emitterToPcIpMap.remove(emitter);
+                return true; // Rimuovi emitter in errore
+            }
+        });
     }
 
     /**
