@@ -388,6 +388,16 @@ public class DeviceMonitoringService {
             combined.put("camError", "IP cam non ancora trovata");
         }
 
+        // Stato NAS
+        String nasIp = "100.95.79.3";
+        Map<String, Object> nasStatus = getNasStatus(nasIp);
+        combined.put("nasIp", nasIp);
+        combined.put("nasOnline", nasStatus.getOrDefault("online", false));
+
+        if (nasStatus.containsKey("error")) {
+            combined.put("nasError", nasStatus.get("error"));
+        }
+
         return combined;
     }
 
@@ -438,6 +448,30 @@ public class DeviceMonitoringService {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    /**
+     * Ottiene lo stato del NAS tramite ping
+     */
+    private Map<String, Object> getNasStatus(String ipAddress) {
+        Map<String, Object> status = new HashMap<>();
+        status.put("ip", ipAddress);
+        status.put("timestamp", System.currentTimeMillis());
+
+        try {
+            InetAddress inet = InetAddress.getByName(ipAddress);
+            boolean isOnline = inet.isReachable(2000);
+            status.put("online", isOnline);
+
+            if (!isOnline) {
+                status.put("error", "NAS offline - ping fallito");
+            }
+        } catch (Exception e) {
+            status.put("online", false);
+            status.put("error", "Errore controllo NAS: " + e.getMessage());
+        }
+
+        return status;
     }
 
     /**
