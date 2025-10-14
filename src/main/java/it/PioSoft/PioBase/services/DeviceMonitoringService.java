@@ -313,9 +313,13 @@ public class DeviceMonitoringService {
 
                 return false; // Mantieni emitter
             } catch (IOException e) {
-                System.out.println("Errore invio SSE per PC " + pcIp + ", rimuovo emitter");
+                System.out.println("Errore invio SSE per PC " + pcIp + " - " + e.getClass().getSimpleName() + ": " + e.getMessage());
                 emitterToPcIpMap.remove(emitter);
                 return true; // Rimuovi emitter in errore
+            } catch (Exception e) {
+                System.out.println("Errore generico SSE per PC " + pcIp + " - " + e.getClass().getSimpleName() + ": " + e.getMessage());
+                emitterToPcIpMap.remove(emitter);
+                return true;
             }
         });
     }
