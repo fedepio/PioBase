@@ -300,7 +300,6 @@ public class DeviceMonitoringService {
         combinedEmitters.removeIf(emitter -> {
             String pcIp = emitterToPcIpMap.get(emitter);
             if (pcIp == null) {
-                System.out.println("Emitter senza PC IP associato, rimuovo");
                 emitterToPcIpMap.remove(emitter);
                 return true; // Rimuovi emitter senza IP
             }
@@ -312,14 +311,25 @@ public class DeviceMonitoringService {
                 emitter.send(SseEmitter.event().name("systemStatus").data(combinedStatus));
 
                 return false; // Mantieni emitter
-            } catch (IOException e) {
-                System.out.println("Errore invio SSE per PC " + pcIp + " - " + e.getClass().getSimpleName() + ": " + e.getMessage());
+            } catch (Exception e) {
+                // Gestisce le disconnessioni normali del client senza logging eccessivo
+                String errorMsg = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
+                String exceptionName = e.getClass().getSimpleName();
+
+                // Questi sono errori normali di disconnessione - non loggare
+                if (errorMsg.contains("broken pipe") ||
+                    errorMsg.contains("connection reset") ||
+                    errorMsg.contains("asyncrequestnotusable") ||
+                    exceptionName.contains("AsyncRequestNotUsableException") ||
+                    exceptionName.contains("ClientAbortException")) {
+                    // Client disconnesso normalmente - nessun log
+                } else {
+                    // Questo è un errore anomalo - logga per debugging
+                    System.out.println("⚠️ Errore SSE anomalo per PC " + pcIp + " - " + exceptionName + ": " + e.getMessage());
+                }
+
                 emitterToPcIpMap.remove(emitter);
                 return true; // Rimuovi emitter in errore
-            } catch (Exception e) {
-                System.out.println("Errore generico SSE per PC " + pcIp + " - " + e.getClass().getSimpleName() + ": " + e.getMessage());
-                emitterToPcIpMap.remove(emitter);
-                return true;
             }
         });
     }
