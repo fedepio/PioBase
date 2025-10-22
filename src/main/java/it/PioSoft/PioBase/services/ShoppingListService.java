@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import it.PioSoft.PioBase.model.ShoppingItem;
+import it.PioSoft.PioBase.websocket.ShoppingListWebSocketHandler;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
@@ -23,9 +24,13 @@ public class ShoppingListService {
     private static final String JSON_FILE_PATH = "config/shopping-list.json";
     private final ObjectMapper objectMapper;
     private final SimpMessagingTemplate messagingTemplate;
+    private final ShoppingListWebSocketHandler nativeWebSocketHandler;
 
-    public ShoppingListService(SimpMessagingTemplate messagingTemplate) {
+    public ShoppingListService(
+            SimpMessagingTemplate messagingTemplate,
+            ShoppingListWebSocketHandler nativeWebSocketHandler) {
         this.messagingTemplate = messagingTemplate;
+        this.nativeWebSocketHandler = nativeWebSocketHandler;
         this.objectMapper = new ObjectMapper();
         this.objectMapper.registerModule(new JavaTimeModule());
     }
@@ -76,8 +81,11 @@ public class ShoppingListService {
         items.add(item);
         saveToFile(items);
 
-        // Notifica gli altri client
+        // Notifica gli altri client (STOMP)
         messagingTemplate.convertAndSend("/topic/shopping-list", item);
+
+        // Notifica iOS client (Native WebSocket)
+        nativeWebSocketHandler.broadcastItemUpdate(item);
 
         return item;
     }
@@ -94,8 +102,11 @@ public class ShoppingListService {
                 items.set(i, updatedItem);
                 saveToFile(items);
 
-                // Notifica gli altri client
+                // Notifica gli altri client (STOMP)
                 messagingTemplate.convertAndSend("/topic/shopping-list", updatedItem);
+
+                // Notifica iOS client (Native WebSocket)
+                nativeWebSocketHandler.broadcastItemUpdate(updatedItem);
 
                 return Optional.of(updatedItem);
             }
@@ -113,8 +124,11 @@ public class ShoppingListService {
         if (removed) {
             saveToFile(items);
 
-            // Notifica gli altri client
+            // Notifica gli altri client (STOMP)
             messagingTemplate.convertAndSend("/topic/shopping-list-delete", id);
+
+            // Notifica iOS client (Native WebSocket)
+            nativeWebSocketHandler.broadcastItemDelete(id);
         }
 
         return removed;
@@ -131,8 +145,11 @@ public class ShoppingListService {
                 item.setSpuntato(!item.isSpuntato());
                 saveToFile(items);
 
-                // Notifica gli altri client
+                // Notifica gli altri client (STOMP)
                 messagingTemplate.convertAndSend("/topic/shopping-list", item);
+
+                // Notifica iOS client (Native WebSocket)
+                nativeWebSocketHandler.broadcastItemUpdate(item);
 
                 return Optional.of(item);
             }
@@ -151,8 +168,11 @@ public class ShoppingListService {
                 item.addPlusOne(username);
                 saveToFile(items);
 
-                // Notifica gli altri client
+                // Notifica gli altri client (STOMP)
                 messagingTemplate.convertAndSend("/topic/shopping-list", item);
+
+                // Notifica iOS client (Native WebSocket)
+                nativeWebSocketHandler.broadcastItemUpdate(item);
 
                 return Optional.of(item);
             }
@@ -171,8 +191,11 @@ public class ShoppingListService {
                 item.removePlusOne(username);
                 saveToFile(items);
 
-                // Notifica gli altri client
+                // Notifica gli altri client (STOMP)
                 messagingTemplate.convertAndSend("/topic/shopping-list", item);
+
+                // Notifica iOS client (Native WebSocket)
+                nativeWebSocketHandler.broadcastItemUpdate(item);
 
                 return Optional.of(item);
             }
