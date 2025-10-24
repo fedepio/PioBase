@@ -417,7 +417,7 @@ interface IpCamApi {
     @POST("/api/stream/start-auto")
     suspend fun startStream(): StreamResponse
     
-    @GET("/api/stream/stop")
+    @GET(")
     suspend fun stopStream(): Map<String, Any>
     
     @GET("/api/stream/status")

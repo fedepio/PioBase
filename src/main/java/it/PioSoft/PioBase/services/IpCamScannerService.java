@@ -28,14 +28,16 @@ public class IpCamScannerService {
     private static final long RESCAN_INTERVAL_MS = 20 * 60 * 1000; // 20 minuti in millisecondi
 
     private final DeviceMonitoringService monitoringService;
+    private final IpCamMonitorService ipCamMonitorService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private String currentCamIp = null;
     private boolean isScanning = false;
     private long lastScanTime = 0; // Timestamp dell'ultima scansione
 
-    public IpCamScannerService(DeviceMonitoringService monitoringService) {
+    public IpCamScannerService(DeviceMonitoringService monitoringService, IpCamMonitorService ipCamMonitorService) {
         this.monitoringService = monitoringService;
+        this.ipCamMonitorService = ipCamMonitorService;
         // Registra questo service nel monitoring service per evitare dipendenze circolari
         monitoringService.setIpCamScannerService(this);
         initializeConfigDirectory();
@@ -68,12 +70,15 @@ public class IpCamScannerService {
                 currentCamIp = (String) config.get("ip");
                 logger.info("IP cam caricato da config: {}", currentCamIp);
 
-                // Avvia il monitoraggio della cam
-                if (currentCamIp != null) {
-                    startCamMonitoring();
-                }
+                // DISABILITATO: IpCamMonitorService causa conflitti con MediaMTX
+                // MediaMTX gestisce già la connessione persistente alla camera
+                // if (currentCamIp != null) {
+                //     ipCamMonitorService.startMonitoring(currentCamIp);
+                // }
+                logger.info("Monitoraggio camera delegato a MediaMTX (connessione UDP stabile)");
             } else {
                 logger.info("Nessuna configurazione cam trovata, avvio scansione iniziale");
+                // Usa il vecchio metodo di scansione invece di IpCamMonitorService
                 scanAndSaveCamIp();
             }
         } catch (IOException e) {
@@ -83,7 +88,7 @@ public class IpCamScannerService {
     }
 
     /**
-     * Salva l'IP della cam nel file JSON
+     * Salva l'IP della cam nel file JSON e aggiorna mediamtx
      */
     private void saveCamIpToConfig(String ip) {
         try {
@@ -96,8 +101,46 @@ public class IpCamScannerService {
             objectMapper.writerWithDefaultPrettyPrinter().writeValue(configFile, config);
             currentCamIp = ip;
             logger.info("IP cam salvato: {}", ip);
+
+            // Aggiorna mediamtx con il nuovo IP
+            updateMediaMtxConfig();
+
         } catch (IOException e) {
             logger.error("Errore salvataggio configurazione cam", e);
+        }
+    }
+
+    /**
+     * Esegue lo script per aggiornare mediamtx.yml e riavviare il servizio
+     */
+    private void updateMediaMtxConfig() {
+        try {
+            String scriptPath = Paths.get("update-mediamtx-ip.sh").toAbsolutePath().toString();
+            logger.info("Esecuzione script aggiornamento mediamtx: {}", scriptPath);
+
+            ProcessBuilder processBuilder = new ProcessBuilder("/bin/bash", scriptPath);
+            processBuilder.redirectErrorStream(true);
+
+            Process process = processBuilder.start();
+
+            // Leggi l'output dello script
+            try (var reader = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    logger.info("Script mediamtx: {}", line);
+                }
+            }
+
+            int exitCode = process.waitFor();
+            if (exitCode == 0) {
+                logger.info("MediaMTX aggiornato e riavviato con successo");
+            } else {
+                logger.error("Errore esecuzione script mediamtx (exit code: {})", exitCode);
+            }
+
+        } catch (Exception e) {
+            logger.error("Errore durante l'aggiornamento di mediamtx", e);
         }
     }
 
@@ -154,10 +197,11 @@ public class IpCamScannerService {
     }
 
     /**
-     * Verifica periodicamente lo stato della cam (ogni 3 secondi)
+     * Verifica periodicamente lo stato della cam (ogni 10 secondi - ridotto carico)
      * Esegue scansione completa della rete solo se offline E sono passati almeno 20 minuti
+     * Usa ping semplice per evitare conflitti con MediaMTX
      */
-    @Scheduled(fixedDelay = 3000)
+    @Scheduled(fixedDelay = 10000)
     public void checkCamStatus() {
         if (currentCamIp == null) {
             // Se non abbiamo un IP, prova a scansionare (solo se non stiamo già scansionando)
@@ -465,6 +509,11 @@ public class IpCamScannerService {
      * Ottiene l'IP corrente della cam
      */
     public String getCurrentCamIp() {
+        // Usa il nuovo servizio se disponibile
+        String monitorIp = ipCamMonitorService.getCurrentCamIp();
+        if (monitorIp != null) {
+            return monitorIp;
+        }
         return currentCamIp;
     }
 

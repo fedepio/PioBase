@@ -38,6 +38,7 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api")
+@CrossOrigin(origins = "*", allowedHeaders = "*", exposedHeaders = "*")
 public class PersonalPcController {
 
     @Autowired

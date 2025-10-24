@@ -403,7 +403,7 @@ public class DeviceMonitoringService {
         }
 
         // Stato NAS
-        String nasIp = "100.95.79.3";
+        String nasIp = "100.116.8.49";
         Map<String, Object> nasStatus = getNasStatus(nasIp);
         combined.put("nasIp", nasIp);
         combined.put("nasOnline", nasStatus.getOrDefault("online", false));
@@ -416,24 +416,41 @@ public class DeviceMonitoringService {
     }
 
     /**
-     * Ottiene lo stato della camera IP (solo ping, senza SSH)
+     * Ottiene lo stato della camera IP usando la connessione persistente ottimizzata
      */
     private Map<String, Object> getCameraStatus(String ipAddress) {
         Map<String, Object> status = new HashMap<>();
         status.put("ip", ipAddress);
         status.put("timestamp", System.currentTimeMillis());
 
-        try {
-            // Ping diretto alla camera - verifica porta RTSP 554
-            boolean isOnline = checkCameraOnline(ipAddress);
-            status.put("online", isOnline);
+        // Usa lo stato dalla cache (aggiornato dal IpCamMonitorService via updateDeviceStatus)
+        Map<String, Object> cachedStatus = deviceStatusCache.get(ipAddress);
 
-            if (!isOnline) {
-                status.put("error", "Camera offline - ping fallito");
+        if (cachedStatus != null && cachedStatus.containsKey("online")) {
+            // Usa lo stato dalla connessione persistente
+            status.put("online", cachedStatus.get("online"));
+
+            if (cachedStatus.containsKey("error")) {
+                status.put("error", cachedStatus.get("error"));
             }
-        } catch (Exception e) {
-            status.put("online", false);
-            status.put("error", "Errore controllo camera: " + e.getMessage());
+
+            // Aggiungi info sulla connessione persistente se disponibile
+            if (cachedStatus.containsKey("persistentConnection")) {
+                status.put("persistentConnection", cachedStatus.get("persistentConnection"));
+            }
+        } else {
+            // Fallback al vecchio metodo se non c'è stato nella cache
+            try {
+                boolean isOnline = checkCameraOnline(ipAddress);
+                status.put("online", isOnline);
+
+                if (!isOnline) {
+                    status.put("error", "Camera offline - ping fallito");
+                }
+            } catch (Exception e) {
+                status.put("online", false);
+                status.put("error", "Errore controllo camera: " + e.getMessage());
+            }
         }
 
         return status;
